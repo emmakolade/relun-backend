@@ -4,11 +4,16 @@
   "description": "TypeScript backend for Relun dating app",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "nodemon",
     "build": "tsc",
     "start": "node dist/server.js"
   },
-  "keywords": ["dating", "typescript", "express", "mongodb"],
+  "keywords": [
+    "dating",
+    "typescript",
+    "express",
+    "mongodb"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -17,13 +22,13 @@
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-validator": "^7.0.1",
-    "jsonwebtoken": "^9.0.2",
-    "socket.io": "^4.6.1",
-    "redis": "^4.6.12",
-    "nodemailer": "^6.9.8",
-    "twilio": "^4.20.0",
     "google-auth-library": "^9.6.3",
-    "mongoose": "^8.1.0"
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.1.0",
+    "nodemailer": "^6.9.8",
+    "redis": "^4.6.12",
+    "socket.io": "^4.6.1",
+    "twilio": "^4.20.0"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
@@ -32,6 +37,8 @@
     "@types/jsonwebtoken": "^9.0.5",
     "@types/node": "^20.11.0",
     "@types/nodemailer": "^6.4.14",
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.2",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
   }

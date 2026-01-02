@@ -5,7 +5,7 @@ export interface IUser extends Document {
   phone?: string;
   fullName?: string;
   dateOfBirth?: Date;
-  gender?: 'male' | 'female' | 'non_binary' | 'other';
+  gender?: 'male' | 'female';
   isActive: boolean;
   isEmailVerified: boolean;
   isPhoneVerified: boolean;
@@ -22,7 +22,7 @@ const userSchema = new Schema<IUser>(
     phone: { type: String, unique: true, sparse: true },
     fullName: { type: String },
     dateOfBirth: { type: Date },
-    gender: { type: String, enum: ['male', 'female', 'non_binary', 'other'] },
+    gender: { type: String, enum: ['male', 'female'] },
     isActive: { type: Boolean, default: true },
     isEmailVerified: { type: Boolean, default: false },
     isPhoneVerified: { type: Boolean, default: false },

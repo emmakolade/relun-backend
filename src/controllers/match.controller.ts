@@ -131,7 +131,7 @@ export const blockUser = async (req: AuthRequest, res: Response): Promise<void> 
     }
 
     // Add block logic to user model if needed
-    const otherUserId = match.user1Id.toString() === userId ? match.user2Id : match.user1Id;
+    match.user1Id.toString() === userId ? match.user2Id : match.user1Id;
 
     // For now, just delete the match
     await Match.deleteOne({ _id: matchId });

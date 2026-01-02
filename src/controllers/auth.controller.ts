@@ -213,6 +213,22 @@ export const getCurrentUser = async (req: AuthRequest, res: Response): Promise<v
   }
 };
 
+export const logout = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (refreshToken) {
+      // Delete the refresh token from database
+      await RefreshToken.deleteOne({ token: refreshToken });
+    }
+
+    res.json({ message: 'Logged out successfully' });
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(500).json({ error: 'Logout failed' });
+  }
+};
+
 export const refreshToken = async (req: Request, res: Response): Promise<void> => {
   try {
     const { refreshToken } = req.body;

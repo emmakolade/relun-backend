@@ -24,54 +24,17 @@
       "key": "access_token",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
     {
       "name": "Authentication",
       "item": [
-        {
-          "name": "Signup",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"Test1234!\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/auth/signup",
-              "host": ["{{base_url}}"],
-              "path": ["api", "auth", "signup"]
-            }
-          }
-        },
-        {
-          "name": "Login",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email_or_phone\": \"test@example.com\",\n  \"password\": \"Test1234!\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/auth/login",
-              "host": ["{{base_url}}"],
-              "path": ["api", "auth", "login"]
-            }
-          }
-        },
         {
           "name": "Request OTP",
           "request": {
@@ -84,7 +47,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"phone_or_email\": \"+1234567890\"\n}"
+              "raw": "{\n  \"email\": \"test@example.com\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/auth/request-otp",
@@ -94,7 +57,7 @@
           }
         },
         {
-          "name": "Verify OTP",
+          "name": "Request OTP (Phone)",
           "request": {
             "method": "POST",
             "header": [
@@ -105,7 +68,41 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"phone_or_email\": \"+1234567890\",\n  \"code\": \"123456\"\n}"
+              "raw": "{\n  \"phone\": \"+1234567890\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/request-otp",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "request-otp"]
+            }
+          }
+        },
+        {
+          "name": "Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.collectionVariables.set(\"access_token\", jsonData.accessToken);",
+                  "pm.collectionVariables.set(\"refresh_token\", jsonData.refreshToken);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"otp\": \"123456\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/auth/verify-otp",
@@ -113,14 +110,9 @@
               "path": ["api", "auth", "verify-otp"]
             }
           }
-        }
-      ]
-    },
-    {
-      "name": "Profile",
-      "item": [
+        },
         {
-          "name": "Create Profile",
+          "name": "Complete Profile",
           "request": {
             "auth": {
               "type": "bearer",
@@ -140,15 +132,104 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"John Doe\",\n  \"age\": 25,\n  \"gender\": \"male\",\n  \"segment\": \"relationship\",\n  \"bio\": \"Looking for meaningful connections\",\n  \"city\": \"New York\",\n  \"country\": \"USA\"\n}"
+              "raw": "{\n  \"fullName\": \"John Doe\",\n  \"dateOfBirth\": \"1995-01-15\",\n  \"gender\": \"male\",\n  \"segment\": \"dating\",\n  \"bio\": \"Looking for meaningful connections\",\n  \"email\": \"test@example.com\"\n}"
             },
             "url": {
-              "raw": "{{base_url}}/api/profile/create",
+              "raw": "{{base_url}}/api/auth/complete-profile",
               "host": ["{{base_url}}"],
-              "path": ["api", "profile", "create"]
+              "path": ["api", "auth", "complete-profile"]
             }
           }
         },
+        {
+          "name": "Get Current User",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}"
+                }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "me"]
+            }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.collectionVariables.set(\"access_token\", jsonData.accessToken);",
+                  "pm.collectionVariables.set(\"refresh_token\", jsonData.refreshToken);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "refresh"]
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "logout"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Profile",
+      "item": [
         {
           "name": "Get My Profile",
           "request": {
@@ -163,9 +244,9 @@
             },
             "method": "GET",
             "url": {
-              "raw": "{{base_url}}/api/profile/me",
+              "raw": "{{base_url}}/api/profile",
               "host": ["{{base_url}}"],
-              "path": ["api", "profile", "me"]
+              "path": ["api", "profile"]
             }
           }
         },
@@ -190,48 +271,17 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"bio\": \"Updated bio\"\n}"
+              "raw": "{\n  \"bio\": \"Updated bio text\",\n  \"city\": \"New York\",\n  \"segment\": \"both\",\n  \"interests\": [\"music\", \"travel\", \"tech\"],\n  \"lookingFor\": [\"friendship\", \"relationship\"],\n  \"location\": {\n    \"latitude\": 40.7128,\n    \"longitude\": -74.0060\n  }\n}"
             },
             "url": {
-              "raw": "{{base_url}}/api/profile/me",
+              "raw": "{{base_url}}/api/profile",
               "host": ["{{base_url}}"],
-              "path": ["api", "profile", "me"]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Swiping",
-      "item": [
-        {
-          "name": "Get Swipe Feed",
-          "request": {
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "{{access_token}}"
-                }
-              ]
-            },
-            "method": "GET",
-            "url": {
-              "raw": "{{base_url}}/api/swipe/feed?limit=10",
-              "host": ["{{base_url}}"],
-              "path": ["api", "swipe", "feed"],
-              "query": [
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
+              "path": ["api", "profile"]
             }
           }
         },
         {
-          "name": "Swipe Right (Like)",
+          "name": "Upload Photo",
           "request": {
             "auth": {
               "type": "bearer",
@@ -251,12 +301,220 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"swiped_user_id\": 2,\n  \"is_like\": true\n}"
+              "raw": "{\n  \"url\": \"https://example.com/photo.jpg\",\n  \"order\": 0\n}"
             },
             "url": {
-              "raw": "{{base_url}}/api/swipe/action",
+              "raw": "{{base_url}}/api/profile/photos",
               "host": ["{{base_url}}"],
-              "path": ["api", "swipe", "action"]
+              "path": ["api", "profile", "photos"]
+            }
+          }
+        },
+        {
+          "name": "Delete Photo",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/profile/photos/:photoId",
+              "host": ["{{base_url}}"],
+              "path": ["api", "profile", "photos", ":photoId"],
+              "variable": [
+                {
+                  "key": "photoId",
+                  "value": "photo_id_here"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get User Profile",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}"
+                }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/profile/:userId",
+              "host": ["{{base_url}}"],
+              "path": ["api", "profile", ":userId"],
+              "variable": [
+                {
+                  "key": "userId",
+                  "value": "user_id_here"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Swipe",
+      "item": [
+        {
+          "name": "Get Potential Matches",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}"
+                }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/swipe/potential?limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "swipe", "potential"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Swipe (Like)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetUserId\": \"user_id_here\",\n  \"swipeType\": \"like\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/swipe",
+              "host": ["{{base_url}}"],
+              "path": ["api", "swipe"]
+            }
+          }
+        },
+        {
+          "name": "Create Swipe (Dislike)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetUserId\": \"user_id_here\",\n  \"swipeType\": \"dislike\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/swipe",
+              "host": ["{{base_url}}"],
+              "path": ["api", "swipe"]
+            }
+          }
+        },
+        {
+          "name": "Create Swipe (Superlike)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetUserId\": \"user_id_here\",\n  \"swipeType\": \"superlike\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/swipe",
+              "host": ["{{base_url}}"],
+              "path": ["api", "swipe"]
+            }
+          }
+        },
+        {
+          "name": "Get Swipe History",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}"
+                }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/swipe?page=1&limit=20&swipeType=like",
+              "host": ["{{base_url}}"],
+              "path": ["api", "swipe"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "swipeType",
+                  "value": "like",
+                  "description": "Optional: like, dislike, or superlike"
+                }
+              ]
             }
           }
         }
@@ -279,19 +537,24 @@
             },
             "method": "GET",
             "url": {
-              "raw": "{{base_url}}/api/matches",
+              "raw": "{{base_url}}/api/match?page=1&limit=20",
               "host": ["{{base_url}}"],
-              "path": ["api", "matches"]
+              "path": ["api", "match"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
             }
           }
-        }
-      ]
-    },
-    {
-      "name": "Chat",
-      "item": [
+        },
         {
-          "name": "Get Conversations",
+          "name": "Get Match by ID",
           "request": {
             "auth": {
               "type": "bearer",
@@ -304,9 +567,128 @@
             },
             "method": "GET",
             "url": {
-              "raw": "{{base_url}}/api/chat/conversations",
+              "raw": "{{base_url}}/api/match/:matchId",
               "host": ["{{base_url}}"],
-              "path": ["api", "chat", "conversations"]
+              "path": ["api", "match", ":matchId"],
+              "variable": [
+                {
+                  "key": "matchId",
+                  "value": "match_id_here"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Unmatch",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/match/:matchId",
+              "host": ["{{base_url}}"],
+              "path": ["api", "match", ":matchId"],
+              "variable": [
+                {
+                  "key": "matchId",
+                  "value": "match_id_here"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Block User",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}"
+                }
+              ]
+            },
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/match/:matchId/block",
+              "host": ["{{base_url}}"],
+              "path": ["api", "match", ":matchId", "block"],
+              "variable": [
+                {
+                  "key": "matchId",
+                  "value": "match_id_here"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat",
+      "item": [
+        {
+          "name": "Get Unread Count",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}"
+                }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/chat/unread/count",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", "unread", "count"]
+            }
+          }
+        },
+        {
+          "name": "Get Messages",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}"
+                }
+              ]
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/chat/:matchId?page=1&limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", ":matchId"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "matchId",
+                  "value": "match_id_here"
+                }
+              ]
             }
           }
         },
@@ -331,12 +713,48 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"Hello!\"\n}"
+              "raw": "{\n  \"content\": \"Hello! How are you?\",\n  \"messageType\": \"text\"\n}"
             },
             "url": {
-              "raw": "{{base_url}}/api/chat/1/messages",
+              "raw": "{{base_url}}/api/chat/:matchId",
               "host": ["{{base_url}}"],
-              "path": ["api", "chat", "1", "messages"]
+              "path": ["api", "chat", ":matchId"],
+              "variable": [
+                {
+                  "key": "matchId",
+                  "value": "match_id_here"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Message",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/chat/:matchId/:messageId",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chat", ":matchId", ":messageId"],
+              "variable": [
+                {
+                  "key": "matchId",
+                  "value": "match_id_here"
+                },
+                {
+                  "key": "messageId",
+                  "value": "message_id_here"
+                }
+              ]
             }
           }
         }

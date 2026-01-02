@@ -1,3 +1,6 @@
+import { sendEmail } from '../services/email.service';
+import { sendSMS } from '../services/sms.service';
+
 // Generate a 6-digit OTP
 export const generateOTP = (): string => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -10,31 +13,32 @@ export const getOTPExpiry = (): Date => {
   return expiry;
 };
 
-// Send OTP via email (mock for now - integrate with email service)
+// Send OTP via email
 export const sendOTPEmail = async (email: string, otp: string): Promise<void> => {
-  // TODO: Integrate with email service (SendGrid, AWS SES, etc.)
-  console.log(`[EMAIL] Sending OTP ${otp} to ${email}`);
-  
-  // For development, just log it
-  // In production, use actual email service:
-  // await emailService.send({
-  //   to: email,
-  //   subject: 'Your Relun Verification Code',
-  //   text: `Your verification code is: ${otp}. Valid for 10 minutes.`,
-  // });
+  await sendEmail({
+    to: email,
+    subject: "Your Relun Verification Code",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #333;">Welcome to Relun!</h2>
+        <p style="font-size: 16px; color: #555;">Your verification code is:</p>
+        <div style="background-color: #f4f4f4; padding: 20px; text-align: center; margin: 20px 0;">
+          <h1 style="color: #FF6B6B; margin: 0; letter-spacing: 5px;">${otp}</h1>
+        </div>
+        <p style="font-size: 14px; color: #777;">This code will expire in 10 minutes.</p>
+        <p style="font-size: 14px; color: #777;">If you didn't request this code, please ignore this email.</p>
+      </div>
+    `,
+    text: `Your Relun verification code is: ${otp}. Valid for 10 minutes.`,
+  });
 };
 
-// Send OTP via SMS (mock for now - integrate with SMS service)
+// Send OTP via SMS
 export const sendOTPSMS = async (phone: string, otp: string): Promise<void> => {
-  // TODO: Integrate with SMS service (Twilio, AWS SNS, etc.)
-  console.log(`[SMS] Sending OTP ${otp} to ${phone}`);
-  
-  // For development, just log it
-  // In production, use actual SMS service:
-  // await smsService.send({
-  //   to: phone,
-  //   message: `Your Relun verification code is: ${otp}. Valid for 10 minutes.`,
-  // });
+  await sendSMS({
+    to: phone,
+    message: `Your Relun verification code is: ${otp}. Valid for 10 minutes.`,
+  });
 };
 
 // Verify OTP

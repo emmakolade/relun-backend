@@ -52,3 +52,4 @@ export const calculateDistance = (
 const toRad = (value: number): number => {
   return (value * Math.PI) / 180;
 };
+

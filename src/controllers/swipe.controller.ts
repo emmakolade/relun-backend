@@ -120,12 +120,24 @@ export const getPotentialMatches = async (req: AuthRequest, res: Response): Prom
 
     // Add location-based filtering if available
     if (currentProfile?.location) {
-      query['profile.location'] = {
-        $near: {
-          $geometry: currentProfile.location,
-          $maxDistance: 50000, // 50km
+      // Find profile documents within the distance and restrict to those userIds
+      const nearbyProfileUserIds = await Profile.find({
+        location: {
+          $near: {
+            $geometry: currentProfile.location,
+            $maxDistance: 50000, // 50km
+          },
         },
-      };
+      }).distinct('userId');
+
+      // If no nearby profiles, return empty result early
+      if (!nearbyProfileUserIds || nearbyProfileUserIds.length === 0) {
+        res.json({ users: [] });
+        return;
+      }
+
+      // Merge with existing _id filters (keeps $ne and $nin)
+      query._id = { ...query._id, $in: nearbyProfileUserIds };
     }
 
     const potentialMatches = await User.find(query)
