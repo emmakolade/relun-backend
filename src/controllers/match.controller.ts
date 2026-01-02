@@ -30,7 +30,8 @@ export const getMatches = async (req: AuthRequest, res: Response): Promise<void>
           .sort({ createdAt: -1 })
           .limit(1);
 
-        const otherUserId = match.user1Id._id.toString() === userId ? match.user2Id._id : match.user1Id._id;
+        const otherUserId =
+          match.user1Id._id.toString() === userId ? match.user2Id._id : match.user1Id._id;
         const profile = await Profile.findOne({ userId: otherUserId });
         const photos = await Photo.find({ userId: otherUserId }).sort({ order: 1 }).limit(1);
 
@@ -75,7 +76,8 @@ export const getMatchById = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    const otherUserId = match.user1Id._id.toString() === userId ? match.user2Id._id : match.user1Id._id;
+    const otherUserId =
+      match.user1Id._id.toString() === userId ? match.user2Id._id : match.user1Id._id;
     const profile = await Profile.findOne({ userId: otherUserId });
     const photos = await Photo.find({ userId: otherUserId }).sort({ order: 1 });
 

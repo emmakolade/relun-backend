@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { body } from 'express-validator';
 import { authenticate } from '../middleware/auth.middleware';
+import { upload } from '../middleware/upload.middleware';
 import {
   getProfile,
   updateProfile,
@@ -21,7 +22,7 @@ router.put(
   [
     body('bio').optional().isString().isLength({ max: 500 }),
     body('city').optional().isString(),
-    body('segment').optional().isIn(['dating', 'networking', 'both']),
+    body('segment').optional().isIn(['relationship', 'fun']),
     body('lookingFor').optional().isArray(),
     body('interests').optional().isArray(),
     body('location.latitude').optional().isFloat({ min: -90, max: 90 }),
@@ -30,16 +31,12 @@ router.put(
   updateProfile
 );
 
-// Upload photo
-router.post(
-  '/photos',
-  authenticate,
-  [
-    body('url').isURL().withMessage('Valid URL is required'),
-    body('order').optional().isInt({ min: 0 }),
-  ],
-  uploadPhoto
-);
+// Upload photo (supports single or multiple files, max 6 total)
+router.post('/photos', authenticate, upload.array('photos', 6), uploadPhoto);
+// router.post('/photos', authenticate, upload.fields([
+//   { name: 'photo', maxCount: 1 },
+//   { name: 'photos', maxCount: 6 }
+// ]), uploadPhoto);
 
 // Delete photo
 router.delete('/photos/:photoId', authenticate, deletePhoto);

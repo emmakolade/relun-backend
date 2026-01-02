@@ -1,11 +1,6 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.middleware';
-import {
-  getMatches,
-  getMatchById,
-  unmatch,
-  blockUser,
-} from '../controllers/match.controller';
+import { getMatches, getMatchById, unmatch, blockUser } from '../controllers/match.controller';
 
 const router = Router();
 

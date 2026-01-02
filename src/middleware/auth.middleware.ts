@@ -27,15 +27,25 @@ export const authenticate = async (
     const secret = process.env.JWT_SECRET;
 
     if (!secret) {
-      throw new Error('JWT_SECRET not configured');
+      console.error('[AUTH] JWT_SECRET not configured');
+      res.status(500).json({ error: 'Server configuration error' });
+      return;
     }
 
     const decoded = jwt.verify(token, secret) as { userId: string };
+    console.log('[AUTH] Decoded token:', { userId: decoded.userId });
 
     const user = await User.findById(decoded.userId).select('email phone isActive');
 
-    if (!user || !user.isActive) {
-      res.status(401).json({ error: 'Invalid or inactive user' });
+    if (!user) {
+      console.error('[AUTH] User not found:', decoded.userId);
+      res.status(401).json({ error: 'User not found' });
+      return;
+    }
+
+    if (!user.isActive) {
+      console.error('[AUTH] User is inactive:', decoded.userId);
+      res.status(401).json({ error: 'Account is inactive' });
       return;
     }
 
@@ -47,7 +57,14 @@ export const authenticate = async (
 
     next();
   } catch (error) {
-    res.status(401).json({ error: 'Invalid token' });
+    console.error('[AUTH] Token verification error:', error);
+    if (error instanceof jwt.JsonWebTokenError) {
+      res.status(401).json({ error: 'Invalid token format' });
+    } else if (error instanceof jwt.TokenExpiredError) {
+      res.status(401).json({ error: 'Token expired' });
+    } else {
+      res.status(401).json({ error: 'Invalid token' });
+    }
   }
 };
 

@@ -11,7 +11,7 @@ export const sendSMS = async (options: SMSOptions) => {
     // TODO: Implement actual SMS service (Twilio, AWS SNS, etc.)
     console.log(`[SMS] Sending SMS to ${options.to}====>>>>`);
     console.log(`[SMS] Message: ${options.message}`);
-    
+
     // For development, just log it
     // In production, use actual SMS service:
     // const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -21,10 +21,10 @@ export const sendSMS = async (options: SMSOptions) => {
     //   from: process.env.TWILIO_PHONE_NUMBER,
     // });
     // return result;
-    
+
     return { success: true, messageId: 'dev-mode' };
   } catch (error) {
-    console.error("[SMS] Error sending SMS====>>>>", error);
-    throw new Error("Failed to send SMS");
+    console.error('[SMS] Error sending SMS====>>>>', error);
+    throw new Error('Failed to send SMS');
   }
 };

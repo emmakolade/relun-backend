@@ -1,7 +1,13 @@
 import { Request, Response } from 'express';
 import { validationResult } from 'express-validator';
 import { generateTokenPair } from '../utils/jwt.utils';
-import { generateOTP, getOTPExpiry, sendOTPEmail, sendOTPSMS, verifyOTP as verifyOTPUtil } from '../utils/otp.utils';
+import {
+  generateOTP,
+  getOTPExpiry,
+  sendOTPEmail,
+  sendOTPSMS,
+  verifyOTP as verifyOTPUtil,
+} from '../utils/otp.utils';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { User } from '../models/User';
 import { Profile } from '../models/Profile';
@@ -31,7 +37,7 @@ export const requestOTP = async (req: Request, res: Response): Promise<void> => 
     const queryConditions = [];
     if (email) queryConditions.push({ email });
     if (phone) queryConditions.push({ phone });
-    
+
     let user: any = await User.findOne({
       $or: queryConditions,
     });
@@ -71,6 +77,7 @@ export const requestOTP = async (req: Request, res: Response): Promise<void> => 
   }
 };
 
+// Login - Step 3 of authentication (after OTP verification)
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
     const errors = validationResult(req);
@@ -85,6 +92,79 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       res.status(400).json({ error: 'Email or phone is required' });
       return;
     }
+
+    const queryConditions = [];
+    if (email) queryConditions.push({ email });
+    if (phone) queryConditions.push({ phone });
+
+    const user = await User.findOne({
+      $or: queryConditions,
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    // Check if email/phone is verified
+    if (email && !user.isEmailVerified) {
+      res.status(403).json({ error: 'Email not verified. Please verify OTP first.' });
+      return;
+    }
+
+    if (phone && !user.isPhoneVerified) {
+      res.status(403).json({ error: 'Phone not verified. Please verify OTP first.' });
+      return;
+    }
+
+    if (!user.isActive) {
+      res.status(403).json({ error: 'Account is disabled' });
+      return;
+    }
+
+    // Update last active
+    user.lastActive = new Date();
+    await user.save();
+
+    // Generate tokens
+    const tokens = generateTokenPair({
+      userId: user._id.toString(),
+      email: user.email || undefined,
+      phone: user.phone || undefined,
+    });
+
+    // Store refresh token
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + 30);
+
+    await RefreshToken.create({
+      token: tokens.refreshToken,
+      userId: user._id,
+      expiresAt: expiryDate,
+    });
+
+    // Get profile
+    const profile = await Profile.findOne({ userId: user._id }).select(
+      'bio city segment isComplete completenessScore'
+    );
+
+    // Check if profile needs completion
+    const needsProfileCompletion =
+      !user.fullName || !user.dateOfBirth || !user.gender || !profile?.segment;
+    const needsEmail = !user.email;
+    const needsPhone = !user.phone;
+
+    res.json({
+      ...tokens,
+      user: {
+        ...user.toObject(),
+        id: user._id.toString(),
+        profile,
+      },
+      needsProfileCompletion,
+      needsEmail,
+      needsPhone,
+    });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Login failed' });
@@ -110,7 +190,7 @@ export const verifyOTP = async (req: Request, res: Response): Promise<void> => {
     const queryConditions = [];
     if (email) queryConditions.push({ email });
     if (phone) queryConditions.push({ phone });
-    
+
     const user = await User.findOne({
       $or: queryConditions,
     });
@@ -149,10 +229,12 @@ export const verifyOTP = async (req: Request, res: Response): Promise<void> => {
     // Clear OTP
     user.otpCode = undefined;
     user.otpExpiry = undefined;
+
+    // Update last active
     user.lastActive = new Date();
     await user.save();
 
-    // Generate tokens
+    // Generate tokens (auto-login after OTP verification)
     const tokens = generateTokenPair({
       userId: user._id.toString(),
       email: user.email || undefined,
@@ -169,18 +251,24 @@ export const verifyOTP = async (req: Request, res: Response): Promise<void> => {
       expiresAt: expiryDate,
     });
 
-    // Check if profile is complete
-    const profile = await Profile.findOne({ userId: user._id }).select('bio city segment isComplete completenessScore');
+    // Get profile
+    const profile = await Profile.findOne({ userId: user._id }).select(
+      'bio city segment isComplete completenessScore'
+    );
 
     // Check if profile needs completion
-    const needsProfileCompletion = !user.fullName || !user.dateOfBirth || !user.gender || !profile?.segment;
+    const needsProfileCompletion =
+      !user.fullName || !user.dateOfBirth || !user.gender || !profile?.segment;
     const needsEmail = !user.email;
     const needsPhone = !user.phone;
 
     res.json({
-      ...user.toObject(),
-      id: user._id.toString(),
-      profile,
+      ...tokens,
+      user: {
+        ...user.toObject(),
+        id: user._id.toString(),
+        profile,
+      },
       needsProfileCompletion,
       needsEmail,
       needsPhone,
@@ -188,7 +276,7 @@ export const verifyOTP = async (req: Request, res: Response): Promise<void> => {
   } catch (error) {
     console.error('Verify OTP error:', error);
     res.status(500).json({ error: 'OTP verification failed' });
-  } 
+  }
 };
 
 export const getCurrentUser = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -200,7 +288,9 @@ export const getCurrentUser = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    const profile = await Profile.findOne({ userId: user._id }).select('bio city segment isComplete completenessScore');
+    const profile = await Profile.findOne({ userId: user._id }).select(
+      'bio city segment isComplete completenessScore'
+    );
 
     res.json({
       ...user.toObject(),
@@ -215,12 +305,13 @@ export const getCurrentUser = async (req: AuthRequest, res: Response): Promise<v
 
 export const logout = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { refreshToken } = req.body;
+    const userId = req.user!.id;
 
-    if (refreshToken) {
-      // Delete the refresh token from database
-      await RefreshToken.deleteOne({ token: refreshToken });
-    }
+    // Delete all refresh tokens for this user
+    await RefreshToken.deleteMany({ userId });
+
+    // Update user's last active
+    await User.findByIdAndUpdate(userId, { lastActive: new Date() });
 
     res.json({ message: 'Logged out successfully' });
   } catch (error) {
@@ -276,4 +367,3 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
     res.status(500).json({ error: 'Token refresh failed' });
   }
 };
-

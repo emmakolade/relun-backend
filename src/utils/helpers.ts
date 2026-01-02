@@ -6,10 +6,7 @@ export const hashPassword = async (password: string): Promise<string> => {
   return bcrypt.hash(password, SALT_ROUNDS);
 };
 
-export const comparePassword = async (
-  password: string,
-  hash: string
-): Promise<boolean> => {
+export const comparePassword = async (password: string, hash: string): Promise<boolean> => {
   return bcrypt.compare(password, hash);
 };
 
@@ -38,10 +35,7 @@ export const calculateDistance = (
 
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) *
-      Math.cos(toRad(lat2)) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distance = R * c;
@@ -52,4 +46,3 @@ export const calculateDistance = (
 const toRad = (value: number): number => {
   return (value * Math.PI) / 180;
 };
-

@@ -1,12 +1,16 @@
+// Load environment variables FIRST before any other imports
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import dotenv from 'dotenv';
 import { connectDB } from './config/database';
 
-// Load environment variables
-dotenv.config();
+// Configure Cloudinary after env vars are loaded
+import { configureCloudinary } from './services/cloudinary.service';
+configureCloudinary();
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -32,10 +36,12 @@ const io = new Server(httpServer, {
 initializeSocketIO(io);
 
 // Middleware
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN || '*',
+    credentials: true,
+  })
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -47,8 +53,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // Health check
 app.get('/health', (req: Request, res: Response) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
     service: 'Relun API',
   });
@@ -69,7 +75,7 @@ app.use((req: Request, res: Response) => {
 // Error handling middleware
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error('Error:', err);
-  res.status(500).json({ 
+  res.status(500).json({
     error: 'Internal server error',
     message: process.env.NODE_ENV === 'development' ? err.message : undefined,
   });

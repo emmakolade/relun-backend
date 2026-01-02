@@ -12,6 +12,10 @@ export interface IProfile extends Document {
   country?: string;
   latitude?: number;
   longitude?: number;
+  location?: {
+    type: string;
+    coordinates: number[];
+  };
   height?: number;
   bodyType?: string;
   ethnicity?: string;
@@ -42,6 +46,17 @@ const profileSchema = new Schema<IProfile>(
     country: String,
     latitude: Number,
     longitude: Number,
+    location: {
+      type: {
+        type: String,
+        enum: ['Point'],
+        default: 'Point',
+      },
+      coordinates: {
+        type: [Number],
+        index: '2dsphere',
+      },
+    },
     height: Number,
     bodyType: String,
     ethnicity: String,
@@ -51,7 +66,7 @@ const profileSchema = new Schema<IProfile>(
     politicalViews: String,
     lookingFor: String,
     interests: { type: [String], default: [] },
-    segment: { type: String, default: 'mixed' },
+    segment: { type: String, default: 'relationship' },
     isVisible: { type: Boolean, default: true },
     showAge: { type: Boolean, default: true },
     showDistance: { type: Boolean, default: true },

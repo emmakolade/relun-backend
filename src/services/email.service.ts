@@ -17,9 +17,9 @@ interface EmailOptions {
 export const sendEmail = async (options: EmailOptions) => {
   try {
     const transporter = nodemailer.createTransport({
-      service: "gmail",
-      host: process.env.SMTP_HOST || "smtp.gmail.com",
-      port: parseInt(process.env.SMTP_PORT || "587"),
+      service: 'gmail',
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.SMTP_PORT || '587'),
       secure: false, // true for 465, false for other ports
       auth: {
         user: process.env.SMTP_USER,
@@ -29,8 +29,8 @@ export const sendEmail = async (options: EmailOptions) => {
 
     const mailOptions = {
       from: {
-        name: "Relun App",
-        address: process.env.EMAIL_FROM || process.env.SMTP_USER || "",
+        name: 'Relun App',
+        address: process.env.EMAIL_FROM || process.env.SMTP_USER || '',
       },
       to: options.to,
       subject: options.subject,
@@ -43,7 +43,7 @@ export const sendEmail = async (options: EmailOptions) => {
     console.log(`[EMAIL] Email sent successfully to ${options.to}====>>>>`, info.messageId);
     return info;
   } catch (error) {
-    console.error("[EMAIL] Error sending email====>>>>", error);
-    throw new Error("Failed to send email");
+    console.error('[EMAIL] Error sending email====>>>>', error);
+    throw new Error('Failed to send email');
   }
 };

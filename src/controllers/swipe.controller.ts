@@ -119,12 +119,29 @@ export const getPotentialMatches = async (req: AuthRequest, res: Response): Prom
     };
 
     // Add location-based filtering if available
-    if (currentProfile?.location) {
+    // Support both old format (latitude/longitude) and new format (location GeoJSON)
+    const hasLocation =
+      currentProfile?.location?.coordinates ||
+      (currentProfile?.latitude && currentProfile?.longitude);
+
+    if (hasLocation) {
+      let userLocation;
+
+      // Use GeoJSON location if available, otherwise convert lat/lng
+      if (currentProfile.location?.coordinates) {
+        userLocation = currentProfile.location;
+      } else if (currentProfile.latitude && currentProfile.longitude) {
+        userLocation = {
+          type: 'Point',
+          coordinates: [currentProfile.longitude, currentProfile.latitude], // [lng, lat]
+        };
+      }
+
       // Find profile documents within the distance and restrict to those userIds
       const nearbyProfileUserIds = await Profile.find({
         location: {
           $near: {
-            $geometry: currentProfile.location,
+            $geometry: userLocation,
             $maxDistance: 50000, // 50km
           },
         },
@@ -136,8 +153,20 @@ export const getPotentialMatches = async (req: AuthRequest, res: Response): Prom
         return;
       }
 
-      // Merge with existing _id filters (keeps $ne and $nin)
-      query._id = { ...query._id, $in: nearbyProfileUserIds };
+      // Filter out the current user and already swiped users from nearby profiles
+      const filteredNearbyIds = nearbyProfileUserIds.filter(
+        (id) =>
+          id.toString() !== userId &&
+          !swipedUserIds.some((swipedId) => swipedId.toString() === id.toString())
+      );
+
+      if (filteredNearbyIds.length === 0) {
+        res.json({ users: [] });
+        return;
+      }
+
+      // Only include nearby users who haven't been swiped on
+      query._id = { $in: filteredNearbyIds };
     }
 
     const potentialMatches = await User.find(query)

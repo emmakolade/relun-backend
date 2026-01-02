@@ -1,11 +1,7 @@
 import { Router } from 'express';
 import { body } from 'express-validator';
 import { authenticate } from '../middleware/auth.middleware';
-import {
-  createSwipe,
-  getSwipes,
-  getPotentialMatches,
-} from '../controllers/swipe.controller';
+import { createSwipe, getSwipes, getPotentialMatches } from '../controllers/swipe.controller';
 
 const router = Router();
 

@@ -17,7 +17,7 @@ export const getOTPExpiry = (): Date => {
 export const sendOTPEmail = async (email: string, otp: string): Promise<void> => {
   await sendEmail({
     to: email,
-    subject: "Your Relun Verification Code",
+    subject: 'Your Relun Verification Code',
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #333;">Welcome to Relun!</h2>
