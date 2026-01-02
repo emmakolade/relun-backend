@@ -85,7 +85,7 @@ export const sendMessage = async (req: AuthRequest, res: Response): Promise<void
     });
 
     // Update match's last message timestamp
-    match.lastMessageAt = new Date();
+    // match.lastMessageAt = new Date();
     await match.save();
 
     const populatedMessage = await Message.findById(message._id)
