@@ -54,7 +54,6 @@ const profileSchema = new Schema<IProfile>(
       },
       coordinates: {
         type: [Number],
-        index: '2dsphere',
       },
     },
     height: Number,
@@ -75,5 +74,8 @@ const profileSchema = new Schema<IProfile>(
   },
   { timestamps: true }
 );
+
+// Create 2dsphere index on location field for geospatial queries
+profileSchema.index({ location: '2dsphere' });
 
 export const Profile = mongoose.model<IProfile>('Profile', profileSchema);

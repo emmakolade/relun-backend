@@ -142,7 +142,7 @@ export const getPotentialMatches = async (req: AuthRequest, res: Response): Prom
         location: {
           $near: {
             $geometry: userLocation,
-            $maxDistance: 50000, // 50km
+            $maxDistance: 500000, // 50km
           },
         },
       }).distinct('userId');

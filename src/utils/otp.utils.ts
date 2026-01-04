@@ -41,10 +41,11 @@ export const sendOTPSMS = async (phone: string, otp: string): Promise<void> => {
   });
 };
 
+
 // Verify OTP
 export const verifyOTP = (storedOTP: string, providedOTP: string, expiry: Date): boolean => {
   if (new Date() > expiry) {
-    return false; // OTP expired
+    return false;
   }
   return storedOTP === providedOTP;
 };
