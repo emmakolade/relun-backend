@@ -29,7 +29,7 @@ export const initializeSocketIO = (io: Server) => {
   });
 
   io.on('connection', (socket: AuthenticatedSocket) => {
-    console.log('User connected:', socket.userId);
+    console.log('[User connected]====>>', socket.userId);
 
     // Update user's online status
     if (socket.userId) {
@@ -93,7 +93,7 @@ export const initializeSocketIO = (io: Server) => {
           });
 
           // Update match's last message timestamp
-          match.lastMessageAt = new Date();
+          // match.lastMessageAt = new Date();
           await match.save();
 
           const populatedMessage = await Message.findById(message._id)
