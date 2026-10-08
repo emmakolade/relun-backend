@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
 
-export const COIN_REASONS = ['purchase', 'chat_unlock', 'insights', 'bonus', 'refund'] as const;
+// chat_unlock is no longer charged (chats with matches are free) but stays for old rows.
+export const COIN_REASONS = ['purchase', 'chat_unlock', 'insights', 'bonus', 'refund', 'message_request', 'date_post'] as const;
 export type CoinReason = (typeof COIN_REASONS)[number];
 
 export interface ICoinTransaction extends Document {

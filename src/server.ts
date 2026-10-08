@@ -21,9 +21,11 @@ import coinsRoutes from './routes/coins.routes';
 import datesRoutes from './routes/dates.routes';
 import safetyRoutes from './routes/safety.routes';
 import settingsRoutes from './routes/settings.routes';
+import plusRoutes from './routes/plus.routes';
 
 // Import socket handler
 import { initializeSocketIO } from './socket/chat.socket';
+import { setIO } from './socket/io';
 
 const app: Application = express();
 const httpServer = createServer(app);
@@ -37,6 +39,7 @@ const io = new Server(httpServer, {
 });
 
 initializeSocketIO(io);
+setIO(io);
 
 // Middleware
 app.use(
@@ -79,6 +82,7 @@ app.use('/api/coins', coinsRoutes);
 app.use('/api/dates', datesRoutes);
 app.use('/api/safety', safetyRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/plus', plusRoutes);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {

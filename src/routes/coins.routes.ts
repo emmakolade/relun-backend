@@ -5,7 +5,6 @@ import {
   getWallet,
   getTransactions,
   confirmPurchase,
-  unlockChat,
   buyInsights,
   initializePaystack,
   verifyPaystack,
@@ -47,7 +46,6 @@ router.post('/paystack/webhook', paystackWebhook);
 
 router.post('/bonus/:id/seen', authenticate, markBonusSeen);
 
-router.post('/unlock-chat/:userId', authenticate, unlockChat);
-router.post('/insights', authenticate, buyInsights);
+router.post('/insights', authenticate, [body('days').optional().isIn([7, 30])], buyInsights);
 
 export default router;

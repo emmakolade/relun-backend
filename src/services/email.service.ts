@@ -11,6 +11,8 @@ interface EmailOptions {
     path?: string;
     contentType?: string;
     encoding?: string;
+    /** Content-ID, for inline images referenced as src="cid:...". */
+    cid?: string;
   }>;
 }
 
@@ -29,7 +31,7 @@ export const sendEmail = async (options: EmailOptions) => {
 
     const mailOptions = {
       from: {
-        name: 'Relun App',
+        name: 'Relun',
         address: process.env.EMAIL_FROM || process.env.SMTP_USER || '',
       },
       to: options.to,

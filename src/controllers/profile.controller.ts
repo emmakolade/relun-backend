@@ -9,13 +9,12 @@ import { Like, getMatchedUserIds } from '../models/Like';
 import { Pass } from '../models/Pass';
 import { ProfileView } from '../models/ProfileView';
 import { getBlockedUserIds, isBlockedEitherWay } from '../models/Block';
-import { getConversationId } from '../models/Message';
 import { toCard } from '../services/card.service';
-import { hasActiveInsights } from '../services/wallet.service';
-import { unlockedConversationIds, isChatUnlocked } from '../services/access.service';
+import { canSeeInsights, hasPlus, likeAllowance } from '../services/plus.service';
 import { uploadImage, uploadMultipleImages } from '../services/cloudinary.service';
 import { calculateDistance } from '../utils/helpers';
-import { notifyNewMatch } from '../services/push.service';
+import { notifyLiked, notifyNewMatch, notifyViewed } from '../services/push.service';
+import { acceptMessageRequest, messageRequestView } from '../services/messageRequest.service';
 import {
   CompleteProfileRequest,
   ProfileUpdateData,
@@ -459,22 +458,31 @@ export const getUserProfile = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    const [profile, photos, liked, likedMe, viewerProfile] = await Promise.all([
+    const [profile, photos, liked, likedMe, viewerProfile, messageRequest] = await Promise.all([
       Profile.findOne({ userId }),
       Photo.find({ userId }).sort({ order: 1 }),
       Like.exists({ userId: viewerId, targetUserId: userId }),
       Like.exists({ userId, targetUserId: viewerId }),
       Profile.findOne({ userId: viewerId }).select('latitude longitude'),
+      userId === viewerId ? null : messageRequestView(viewerId, userId),
     ]);
 
     const isMutual = !!liked && !!likedMe;
 
     if (userId !== viewerId) {
-      ProfileView.updateOne(
+      // A notification at most once a day per viewer, so browsing back and forth isn't noise.
+      ProfileView.findOneAndUpdate(
         { viewerId, viewedId: userId },
         { $set: { lastViewedAt: new Date() } },
-        { upsert: true }
-      ).catch((error) => console.error('Record profile view error:', error));
+        { upsert: true, new: false }
+      )
+        .lean()
+        .then((previous) => {
+          if (!previous || Date.now() - previous.lastViewedAt.getTime() > 24 * 60 * 60 * 1000) {
+            void notifyViewed({ viewedId: userId, viewerId });
+          }
+        })
+        .catch((error) => console.error('Record profile view error:', error));
     }
 
     // Distance from the viewer, when both have a location.
@@ -499,7 +507,9 @@ export const getUserProfile = async (req: AuthRequest, res: Response): Promise<v
       relationship: {
         liked: !!liked,
         isMutual,
-        chatUnlocked: isMutual && (await isChatUnlocked(viewerId, userId)),
+        // Whether the viewer can pay to message them without a match.
+        acceptsMessageRequests: profile?.allowMessageRequests ?? true,
+        messageRequest: isMutual ? null : messageRequest,
       },
     });
   } catch (error) {
@@ -546,8 +556,18 @@ export const likeUser = async (req: AuthRequest, res: Response): Promise<void> =
     }
 
     const existingLike = await Like.findOne({ userId, targetUserId });
+    const allowance = await likeAllowance(userId, await hasPlus(userId));
 
     if (!existingLike) {
+      // Free users get FREE_DAILY_LIKES a day; Plus has no limit.
+      if (allowance.left === 0) {
+        res.status(429).json({
+          error: 'You’ve used all your likes for today',
+          code: 'LIKE_LIMIT',
+          resetAt: allowance.resetAt,
+        });
+        return;
+      }
       await Like.create({ userId, targetUserId });
     }
 
@@ -556,10 +576,18 @@ export const likeUser = async (req: AuthRequest, res: Response): Promise<void> =
       targetUserId: userId,
     }));
 
+    // Liking back someone who sent you a message request accepts it and opens
+    // the chat. That also tells them about the match.
+    const acceptedRequest =
+      reciprocalLikeExists &&
+      (await acceptMessageRequest({ senderId: targetUserId, receiverId: userId }));
+
     // Only when the match is newly formed. The liker sees isMutual in this
     // response; the other side liked earlier and has no idea yet, so push them.
-    if (!existingLike && reciprocalLikeExists) {
+    if (!existingLike && reciprocalLikeExists && !acceptedRequest) {
       void notifyNewMatch({ recipientId: targetUserId, matchedUserId: userId });
+    } else if (!existingLike && !reciprocalLikeExists) {
+      void notifyLiked({ recipientId: targetUserId, likerId: userId });
     }
 
     res.status(existingLike ? 200 : 201).json({
@@ -567,6 +595,9 @@ export const likeUser = async (req: AuthRequest, res: Response): Promise<void> =
       isMutual: reciprocalLikeExists,
       alreadyLiked: !!existingLike,
       targetUserId,
+      // Null for Plus (no limit).
+      likesLeft: allowance.left === null ? null : allowance.left - (existingLike ? 0 : 1),
+      likesResetAt: allowance.resetAt,
     });
   } catch (error) {
     console.error('Like user error:', error);
@@ -627,8 +658,8 @@ export const getReceivedLikes = async (req: AuthRequest, res: Response): Promise
     const safeLimit = Math.max(1, Math.min(Number(limit), 200));
 
     // People already liked back are matches and live in Messages instead.
-    const [me, blockedIds, liked] = await Promise.all([
-      User.findById(userId).select('insightsUntil').lean(),
+    const [insights, blockedIds, liked] = await Promise.all([
+      canSeeInsights(userId),
       getBlockedUserIds(userId),
       Like.find({ userId }).select('targetUserId').lean(),
     ]);
@@ -639,8 +670,8 @@ export const getReceivedLikes = async (req: AuthRequest, res: Response): Promise
     const filter = { targetUserId: new Types.ObjectId(userId), userId: { $nin: hidden } };
     const count = await Like.countDocuments(filter);
 
-    // Without insights the app only learns how many, never who.
-    if (!hasActiveInsights(me?.insightsUntil)) {
+    // Without insights (a coin pass or Plus) the app only learns how many, never who.
+    if (!insights) {
       res.json({ locked: true, count, likes: [] });
       return;
     }
@@ -712,21 +743,14 @@ export const getMatches = async (req: AuthRequest, res: Response): Promise<void>
       }
     });
 
-    const unlocked = await unlockedConversationIds(
-      matchedUserIds.map((id) => getConversationId(userId, id))
-    );
-
     const matches = users.map((user) => {
       const key = (user._id as Types.ObjectId).toString();
 
-      return {
-        ...toCard({
-          user,
-          profile: profileByUserId.get(key) || null,
-          photos: photosByUserId.get(key) || [],
-        }),
-        chatUnlocked: unlocked.has(getConversationId(userId, key)),
-      };
+      return toCard({
+        user,
+        profile: profileByUserId.get(key) || null,
+        photos: photosByUserId.get(key) || [],
+      });
     });
 
     res.json({ matches });
@@ -922,10 +946,7 @@ export const passUser = async (req: AuthRequest, res: Response): Promise<void> =
 export const getProfileViews = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user!.id;
-    const [me, blockedIds] = await Promise.all([
-      User.findById(userId).select('insightsUntil').lean(),
-      getBlockedUserIds(userId),
-    ]);
+    const [insights, blockedIds] = await Promise.all([canSeeInsights(userId), getBlockedUserIds(userId)]);
 
     const filter = {
       viewedId: userId,
@@ -933,7 +954,7 @@ export const getProfileViews = async (req: AuthRequest, res: Response): Promise<
     };
     const count = await ProfileView.countDocuments(filter);
 
-    if (!hasActiveInsights(me?.insightsUntil)) {
+    if (!insights) {
       res.json({ locked: true, count, views: [] });
       return;
     }

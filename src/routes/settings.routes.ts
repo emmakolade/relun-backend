@@ -15,6 +15,7 @@ router.patch(
     body('showAge').optional().isBoolean(),
     body('showDistance').optional().isBoolean(),
     body('notificationsEnabled').optional().isBoolean(),
+    body('allowMessageRequests').optional().isBoolean(),
     body('maxDistanceKm').optional().isInt({ min: 1, max: 100 }).toInt(),
     body('ageMin').optional().isInt({ min: 18, max: 99 }).toInt(),
     body('ageMax').optional().isInt({ min: 18, max: 99 }).toInt(),

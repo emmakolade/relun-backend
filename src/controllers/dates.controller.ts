@@ -2,19 +2,19 @@ import { Response } from 'express';
 import { validationResult } from 'express-validator';
 import mongoose, { Types } from 'mongoose';
 import { AuthRequest } from '../middleware/auth.middleware';
-import { DatePost, DateRequest } from '../models/DatePost';
+import { DatePost, DateRequest, DATE_POST_GRACE_MS } from '../models/DatePost';
 import { Profile } from '../models/Profile';
 import { User } from '../models/User';
 import { Photo } from '../models/Photo';
 import { Like } from '../models/Like';
-import { ChatUnlock } from '../models/ChatUnlock';
-import { getConversationId } from '../models/Message';
 import { getBlockedUserIds, isBlockedEitherWay } from '../models/Block';
 import { toCard } from '../services/card.service';
 import { notifyDateRequest, notifyDateAccepted } from '../services/push.service';
+import { dateAllowance, hasPlus } from '../services/plus.service';
+import { spendCoins, creditCoins, InsufficientCoinsError } from '../services/wallet.service';
+import { COIN_COSTS } from '../config/coins';
 
-// A post stays browsable until an hour after its start time.
-const GRACE_MS = 60 * 60 * 1000;
+const GRACE_MS = DATE_POST_GRACE_MS;
 
 const validId = (id: string) => mongoose.Types.ObjectId.isValid(id);
 
@@ -130,6 +130,8 @@ export const myDates = async (req: AuthRequest, res: Response): Promise<void> =>
 };
 
 // POST /api/dates { activity, place, scheduledFor, description? }
+// Free while the poster has a free active slot (1, or 3 with Plus); beyond
+// that each post costs COIN_COSTS.datePost coins.
 export const createDate = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const errors = validationResult(req);
@@ -147,19 +149,42 @@ export const createDate = async (req: AuthRequest, res: Response): Promise<void>
       return;
     }
 
-    const profile = await Profile.findOne({ userId }).select('segment').lean();
+    const [profile, allowance] = await Promise.all([
+      Profile.findOne({ userId }).select('segment').lean(),
+      hasPlus(userId).then((plus) => dateAllowance(userId, plus)),
+    ]);
 
-    const post = await DatePost.create({
-      userId,
-      segment: profile?.segment ?? 'relationship',
-      activity,
-      place,
-      scheduledFor: when,
-      description: description || undefined,
-    });
+    const charged = allowance.left > 0 ? 0 : COIN_COSTS.datePost;
+    const balance = charged
+      ? await spendCoins({ userId, amount: charged, reason: 'date_post' })
+      : ((await User.findById(userId).select('coins').lean())?.coins ?? 0);
 
-    res.status(201).json({ date: { ...serializePost(post.toObject()), requests: [] } });
+    let post;
+    try {
+      post = await DatePost.create({
+        userId,
+        segment: profile?.segment ?? 'relationship',
+        activity,
+        place,
+        scheduledFor: when,
+        description: description || undefined,
+      });
+    } catch (error) {
+      if (charged) await creditCoins({ userId, amount: charged, reason: 'refund', refId: 'date_post' });
+      throw error;
+    }
+
+    res.status(201).json({ date: { ...serializePost(post.toObject()), requests: [] }, charged, balance });
   } catch (error) {
+    if (error instanceof InsufficientCoinsError) {
+      res.status(402).json({
+        error: 'Not enough coins',
+        code: 'INSUFFICIENT_COINS',
+        required: error.required,
+        balance: error.balance,
+      });
+      return;
+    }
     console.error('Create date error:', error);
     res.status(500).json({ error: 'Failed to post date' });
   }
@@ -259,21 +284,16 @@ export const respondToRequest = async (req: AuthRequest, res: Response): Promise
     const requesterId = request.requesterId.toString();
 
     if (status === 'accepted') {
-      // Accepting makes them a match with an open chat, so "Chatting" works at once.
+      // Accepting makes them a match, which opens the chat, so "Chatting" works at once.
       await Promise.all([
         Like.updateOne(
           { userId, targetUserId: requesterId },
-          { $setOnInsert: { userId, targetUserId: requesterId } },
+          { $setOnInsert: { userId, targetUserId: requesterId, source: 'date' } },
           { upsert: true }
         ),
         Like.updateOne(
           { userId: requesterId, targetUserId: userId },
-          { $setOnInsert: { userId: requesterId, targetUserId: userId } },
-          { upsert: true }
-        ),
-        ChatUnlock.updateOne(
-          { conversationId: getConversationId(userId, requesterId) },
-          { $setOnInsert: { unlockedBy: userId, source: 'date' } },
+          { $setOnInsert: { userId: requesterId, targetUserId: userId, source: 'date' } },
           { upsert: true }
         ),
       ]);

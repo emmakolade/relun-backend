@@ -169,6 +169,8 @@ export interface UpdateLocationRequest {
 export interface GetMessagesResponse {
   messages: import('./user.types').Message[];
   pagination: Pagination;
+  // Set while the two are talking through a message request rather than a match.
+  request?: import('../services/messageRequest.service').MessageRequestView | null;
 }
 
 export interface GetConversationsResponse {

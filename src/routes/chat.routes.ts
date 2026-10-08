@@ -8,6 +8,8 @@ import {
   deleteMessage,
   getUnreadCount,
   getConversations,
+  sendMessageRequest,
+  declineMessageRequest,
 } from '../controllers/chat.controller';
 
 const router = Router();
@@ -20,6 +22,20 @@ router.get('/unread/count', authenticate, getUnreadCount);
 
 // Get messages with a specific user
 router.get('/:recipientId', authenticate, getMessages);
+
+const contentRules = () =>
+  body('content')
+    .trim()
+    .notEmpty()
+    .withMessage('Message content is required')
+    .isLength({ max: MAX_MESSAGE_LENGTH })
+    .withMessage(`Message cannot exceed ${MAX_MESSAGE_LENGTH} characters`);
+
+// Pay coins to message someone without a match (a message request)
+router.post('/:recipientId/request', authenticate, [contentRules()], sendMessageRequest);
+
+// Turn down a message request someone sent you
+router.post('/:recipientId/request/decline', authenticate, declineMessageRequest);
 
 // Send a message to a user
 router.post(

@@ -1,5 +1,9 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
 
+// A post stays browsable, and counts as one of its poster's active posts,
+// until an hour after its start time.
+export const DATE_POST_GRACE_MS = 60 * 60 * 1000;
+
 export interface IDatePost extends Document {
   userId: Types.ObjectId;
   segment: string;
@@ -27,6 +31,8 @@ const datePostSchema = new Schema<IDatePost>(
 );
 
 datePostSchema.index({ segment: 1, status: 1, scheduledFor: 1 });
+// Counting a poster's active posts.
+datePostSchema.index({ userId: 1, status: 1, scheduledFor: 1 });
 
 export const DatePost = mongoose.model<IDatePost>('DatePost', datePostSchema);
 

@@ -1,7 +1,8 @@
 import { GoogleAuth } from 'google-auth-library';
 
 /**
- * Checks a Google Play one-time product purchase with the Android Publisher API.
+ * Checks Google Play purchases with the Android Publisher API: one-time coin
+ * products and the Relun Plus subscription.
  *
  * Needs:
  *   ANDROID_PACKAGE_NAME             e.g. com.relun.app
@@ -72,5 +73,75 @@ export const verifyPlayPurchase = async (
   } catch (error) {
     console.error('[billing] Play verification failed:', error);
     return { ok: false, reason: 'Could not verify purchase' };
+  }
+};
+
+type SubscriptionPurchaseV2 = {
+  // SUBSCRIPTION_STATE_ACTIVE, _IN_GRACE_PERIOD, _ON_HOLD, _CANCELED, _EXPIRED, ...
+  subscriptionState?: string;
+  latestOrderId?: string;
+  lineItems?: {
+    productId?: string;
+    expiryTime?: string;
+    autoRenewingPlan?: { autoRenewEnabled?: boolean };
+    offerDetails?: { basePlanId?: string };
+  }[];
+};
+
+export type SubscriptionResult =
+  | {
+      ok: true;
+      // Null only when verification is skipped in development.
+      expiry: Date | null;
+      productId?: string;
+      basePlanId?: string;
+      autoRenew: boolean;
+      orderId?: string;
+    }
+  | { ok: false; reason: string };
+
+/**
+ * Checks a Google Play subscription (Relun Plus) with the subscriptionsv2 API.
+ * A cancelled subscription still counts until its expiry; Google keeps the
+ * expiry current as it renews.
+ */
+export const verifyPlaySubscription = async (purchaseToken: string): Promise<SubscriptionResult> => {
+  const googleAuth = getAuth();
+  const packageName = process.env.ANDROID_PACKAGE_NAME || 'com.relun.app';
+
+  if (!googleAuth) {
+    if (process.env.NODE_ENV === 'production') {
+      return { ok: false, reason: 'Purchase verification is not configured' };
+    }
+    console.warn('[billing] GOOGLE_PLAY_SERVICE_ACCOUNT_PATH not set; accepting unverified subscription');
+    return { ok: true, expiry: null, autoRenew: true };
+  }
+
+  try {
+    const client = await googleAuth.getClient();
+    const url =
+      `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/` +
+      `${encodeURIComponent(packageName)}/purchases/subscriptionsv2/tokens/${encodeURIComponent(purchaseToken)}`;
+
+    const response = await client.request<SubscriptionPurchaseV2>({ url });
+    const sub = response.data;
+    const item = sub.lineItems?.[0];
+    const expiry = item?.expiryTime ? new Date(item.expiryTime) : null;
+
+    if (!expiry || sub.subscriptionState === 'SUBSCRIPTION_STATE_PENDING') {
+      return { ok: false, reason: 'Subscription is not active' };
+    }
+
+    return {
+      ok: true,
+      expiry,
+      productId: item?.productId,
+      basePlanId: item?.offerDetails?.basePlanId,
+      autoRenew: item?.autoRenewingPlan?.autoRenewEnabled ?? false,
+      orderId: sub.latestOrderId,
+    };
+  } catch (error) {
+    console.error('[billing] Play subscription verification failed:', error);
+    return { ok: false, reason: 'Could not verify subscription' };
   }
 };

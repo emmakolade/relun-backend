@@ -5,21 +5,11 @@ import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { User } from '../models/User';
 import { CoinTransaction } from '../models/CoinTransaction';
-import { ChatUnlock } from '../models/ChatUnlock';
-import { getConversationId } from '../models/Message';
-import {
-  COIN_COSTS,
-  COIN_PACKAGES,
-  INSIGHTS_DAYS,
-  SIGNUP_BONUS_REF,
-  findPackageByProductId,
-} from '../config/coins';
-import {
-  spendCoins,
-  creditCoins,
-  hasActiveInsights,
-  InsufficientCoinsError,
-} from '../services/wallet.service';
+import { COIN_COSTS, COIN_PACKAGES, SIGNUP_BONUS_REF, findPackageByProductId } from '../config/coins';
+import { spendCoins, creditCoins, hasActiveInsights, InsufficientCoinsError } from '../services/wallet.service';
+import { canSeeInsights } from '../services/plus.service';
+import { notifyCoinsAdded } from '../services/push.service';
+import { entitlements, handlePlusWebhook } from './plus.controller';
 import { verifyPlayPurchase } from '../services/playBilling.service';
 import {
   initializeTransaction,
@@ -29,7 +19,6 @@ import {
   verifyTransaction,
   PaystackTransaction,
 } from '../services/paystack.service';
-import { canViewConversation, isChatUnlocked } from '../services/access.service';
 
 const insufficient = (res: Response, error: InsufficientCoinsError) =>
   res.status(402).json({
@@ -42,20 +31,25 @@ const insufficient = (res: Response, error: InsufficientCoinsError) =>
 // GET /api/coins
 export const getWallet = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const [user, bonus] = await Promise.all([
-      User.findById(req.user!.id).select('coins insightsUntil').lean(),
-      CoinTransaction.findOne({ userId: req.user!.id, reason: 'bonus', announced: false })
+    const userId = req.user!.id;
+    const [user, bonus, insightsActive, plus] = await Promise.all([
+      User.findById(userId).select('coins insightsUntil').lean(),
+      CoinTransaction.findOne({ userId, reason: 'bonus', announced: false })
         .sort({ createdAt: 1 })
         .select('amount refId')
         .lean(),
+      canSeeInsights(userId),
+      entitlements(userId),
     ]);
 
     res.json({
       balance: user?.coins ?? 0,
-      insightsActive: hasActiveInsights(user?.insightsUntil),
+      // Likes & Views, from a coin pass or from Plus.
+      insightsActive,
       insightsUntil: user?.insightsUntil ?? null,
       costs: COIN_COSTS,
       packages: COIN_PACKAGES,
+      ...plus,
       // A bonus the user hasn't been told about yet; the app shows it once.
       pendingBonus: bonus
         ? {
@@ -141,6 +135,7 @@ export const confirmPurchase = async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
+    void notifyCoinsAdded({ userId: req.user!.id, coins: pkg.coins });
     res.status(201).json({ credited: pkg.coins, balance, alreadyProcessed: false });
   } catch (error) {
     console.error('Confirm purchase error:', error);
@@ -192,6 +187,7 @@ const creditPaystack = async (tx: PaystackTransaction): Promise<PaystackCredit> 
     const user = await User.findById(userId).select('coins').lean();
     return { ok: true, credited: 0, balance: user?.coins ?? 0, alreadyProcessed: true };
   }
+  void notifyCoinsAdded({ userId, coins: pkg.coins });
   return { ok: true, credited: pkg.coins, balance, alreadyProcessed: false };
 };
 
@@ -284,6 +280,8 @@ export const paystackWebhook = async (req: Request, res: Response): Promise<void
 
   try {
     const event = req.body as { event?: string; data?: { reference?: string } };
+    // Plus charges, renewals and subscription changes.
+    if (await handlePlusWebhook(event)) return;
     if (event.event !== 'charge.success' || !event.data?.reference) return;
 
     // Re-fetch rather than trusting the payload's amount.
@@ -313,82 +311,24 @@ export const markBonusSeen = async (req: AuthRequest, res: Response): Promise<vo
   }
 };
 
-// POST /api/coins/unlock-chat/:userId
-export const unlockChat = async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const userId = req.user!.id;
-    const { userId: otherId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(otherId)) {
-      res.status(400).json({ error: 'Invalid user id' });
-      return;
-    }
-
-    if (!(await canViewConversation(userId, otherId))) {
-      res.status(403).json({ error: 'You can only unlock chats with your matches' });
-      return;
-    }
-
-    if (await isChatUnlocked(userId, otherId)) {
-      const user = await User.findById(userId).select('coins').lean();
-      res.json({ unlocked: true, charged: 0, balance: user?.coins ?? 0 });
-      return;
-    }
-
-    const balance = await spendCoins({
-      userId,
-      amount: COIN_COSTS.chatUnlock,
-      reason: 'chat_unlock',
-      refId: otherId,
-    });
-
-    try {
-      await ChatUnlock.create({
-        conversationId: getConversationId(userId, otherId),
-        unlockedBy: userId,
-        source: 'coins',
-      });
-    } catch (error) {
-      // The other side unlocked in the same instant. Give the coins back.
-      if ((error as { code?: number }).code === 11000) {
-        const refunded = await creditCoins({
-          userId,
-          amount: COIN_COSTS.chatUnlock,
-          reason: 'refund',
-          refId: otherId,
-        });
-        res.json({ unlocked: true, charged: 0, balance: refunded ?? balance });
-        return;
-      }
-      throw error;
-    }
-
-    res.status(201).json({ unlocked: true, charged: COIN_COSTS.chatUnlock, balance });
-  } catch (error) {
-    if (error instanceof InsufficientCoinsError) {
-      insufficient(res, error);
-      return;
-    }
-    console.error('Unlock chat error:', error);
-    res.status(500).json({ error: 'Failed to unlock chat' });
-  }
-};
-
-// POST /api/coins/insights
+// POST /api/coins/insights { days: 7 | 30 }
+// Likes & Views for coins, for people who'd rather not subscribe to Plus.
 export const buyInsights = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user!.id;
+    const days = Number(req.body?.days) === 7 ? 7 : 30;
     const balance = await spendCoins({
       userId,
-      amount: COIN_COSTS.insights,
+      amount: days === 7 ? COIN_COSTS.insights7 : COIN_COSTS.insights30,
       reason: 'insights',
+      refId: `${days}d`,
     });
 
     // Extends from whichever is later, now or the current expiry, so buying
     // early never wastes remaining days.
     const user = await User.findById(userId).select('insightsUntil');
     const start = hasActiveInsights(user?.insightsUntil) ? user!.insightsUntil! : new Date();
-    const insightsUntil = new Date(start.getTime() + INSIGHTS_DAYS * 24 * 60 * 60 * 1000);
+    const insightsUntil = new Date(start.getTime() + days * 24 * 60 * 60 * 1000);
 
     await User.updateOne({ _id: userId }, { insightsUntil });
 

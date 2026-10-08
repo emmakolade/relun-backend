@@ -3,6 +3,7 @@ import { User } from '../models/User';
 import { Message } from '../models/Message';
 import { Profile } from '../models/Profile';
 import { getFirebaseMessaging } from './firebase.service';
+import { addNotification } from './inbox.service';
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 // Expo accepts at most 100 messages per request.
@@ -189,6 +190,34 @@ export const notifyNewMessage = async (params: {
   }
 };
 
+export const notifyMessageRequest = async (params: {
+  recipientId: string;
+  senderId: string;
+  content: string;
+}): Promise<void> => {
+  try {
+    const sender = await User.findById(params.senderId).select('fullName').lean();
+    const name = sender?.fullName?.split(' ')[0] || 'Someone';
+
+    await addNotification({
+      userId: params.recipientId,
+      type: 'message_request',
+      actorId: params.senderId,
+      title: 'New message request',
+      body: `${name} sent you a message. Reply to match, or decline.`,
+      data: { userId: params.senderId },
+    });
+    await sendPushToUser(params.recipientId, {
+      title: 'New message request',
+      body: `${name}: ${preview(params.content)}`,
+      // Opens the conversation, where they can reply or decline.
+      data: { type: 'message_request', userId: params.senderId },
+    });
+  } catch (error) {
+    console.error('Notify message request error:', error);
+  }
+};
+
 export const notifyNewMatch = async (params: {
   recipientId: string;
   matchedUserId: string;
@@ -196,6 +225,14 @@ export const notifyNewMatch = async (params: {
   try {
     const matchedUser = await User.findById(params.matchedUserId).select('fullName').lean();
 
+    await addNotification({
+      userId: params.recipientId,
+      type: 'match',
+      actorId: params.matchedUserId,
+      title: "It's a match!",
+      body: `You and ${matchedUser?.fullName?.split(' ')[0] || 'someone'} liked each other. Say hello!`,
+      data: { userId: params.matchedUserId },
+    });
     await sendPushToUser(params.recipientId, {
       title: "It's a match!",
       body: `You and ${matchedUser?.fullName || 'someone'} liked each other.`,
@@ -212,10 +249,19 @@ export const notifyDateRequest = async (params: {
   activity: string;
 }): Promise<void> => {
   const requester = await User.findById(params.requesterId).select('fullName').lean();
+  const body = `${requester?.fullName?.split(' ')[0] || 'Someone'} wants to join "${params.activity}".`;
 
+  await addNotification({
+    userId: params.ownerId,
+    type: 'date_request',
+    actorId: params.requesterId,
+    title: 'New date request',
+    body,
+    data: { userId: params.requesterId },
+  });
   await sendPushToUser(params.ownerId, {
     title: 'New date request',
-    body: `${requester?.fullName?.split(' ')[0] || 'Someone'} wants to join "${params.activity}".`,
+    body,
     data: { type: 'date_request', userId: params.requesterId },
   });
 };
@@ -226,10 +272,74 @@ export const notifyDateAccepted = async (params: {
   activity: string;
 }): Promise<void> => {
   const owner = await User.findById(params.ownerId).select('fullName').lean();
+  const body = `${owner?.fullName?.split(' ')[0] || 'They'} accepted you for "${params.activity}". Say hello!`;
 
+  await addNotification({
+    userId: params.requesterId,
+    type: 'date_accepted',
+    actorId: params.ownerId,
+    title: 'Date accepted',
+    body,
+    data: { userId: params.ownerId },
+  });
   await sendPushToUser(params.requesterId, {
     title: 'Date accepted',
-    body: `${owner?.fullName?.split(' ')[0] || 'They'} accepted you for "${params.activity}". Say hello!`,
+    body,
     data: { type: 'match', userId: params.ownerId },
   });
 };
+
+/**
+ * A new one-sided like. Who it was stays hidden without Likes & Views (the
+ * list endpoint decides), so the push never names them either.
+ */
+export const notifyLiked = async (params: { recipientId: string; likerId: string }): Promise<void> => {
+  try {
+    await addNotification({
+      userId: params.recipientId,
+      type: 'like',
+      actorId: params.likerId,
+      title: 'Someone likes you',
+      body: 'See who it is, and match instantly.',
+      data: { userId: params.likerId },
+    });
+    await sendPushToUser(params.recipientId, {
+      title: 'Someone likes you 👀',
+      body: 'Open Relun to see who it is.',
+      data: { type: 'like' },
+    });
+  } catch (error) {
+    console.error('Notify liked error:', error);
+  }
+};
+
+/** A profile view: in the app only, no push. At most one per viewer a day (the caller checks). */
+export const notifyViewed = async (params: { viewedId: string; viewerId: string }): Promise<void> =>
+  addNotification({
+    userId: params.viewedId,
+    type: 'view',
+    actorId: params.viewerId,
+    title: 'Someone viewed your profile',
+    body: 'See who’s been looking.',
+    data: { userId: params.viewerId },
+  });
+
+/** Plus started, or renewed. In the app only; the purchase itself already confirmed it. */
+export const notifyPlus = async (params: { userId: string; renewed: boolean; until: Date }): Promise<void> =>
+  addNotification({
+    userId: params.userId,
+    type: 'plus',
+    title: params.renewed ? 'Relun Plus renewed' : 'Welcome to Relun Plus',
+    body: params.renewed
+      ? 'Your Plus is active for another period. Enjoy unlimited likes.'
+      : 'Unlimited likes, see who likes you, and free message requests are on.',
+  });
+
+/** Coins bought and credited. In the app only. */
+export const notifyCoinsAdded = async (params: { userId: string; coins: number }): Promise<void> =>
+  addNotification({
+    userId: params.userId,
+    type: 'coins',
+    title: 'Coins added',
+    body: `${params.coins.toLocaleString()} coins are in your balance.`,
+  });

@@ -8,7 +8,7 @@ import {
   MessageType,
 } from '../models/Message';
 import { getMatchedUserIds } from '../models/Like';
-import { canViewConversation, getChatAccess, CHAT_ACCESS_ERRORS } from '../services/access.service';
+import { canViewConversation, resolveSendAccess, CHAT_ACCESS_ERRORS } from '../services/access.service';
 import { User } from '../models/User';
 import {
   SocketSendMessageData,
@@ -153,9 +153,10 @@ export const initializeSocketIO = (io: Server) => {
           return;
         }
 
-        // A match implies both users exist; blocks and unpaid chats are refused too.
-        const access = await getChatAccess(userId, recipientId);
-        if (access !== 'ok') {
+        // A match or message request implies both users exist; blocks, unpaid
+        // chats and spent requests are refused. Replying to a request accepts it.
+        const access = await resolveSendAccess(userId, recipientId);
+        if (access !== 'ok' && access !== 'reply') {
           socket.emit('error', {
             message: CHAT_ACCESS_ERRORS[access],
             code: access.toUpperCase(),
