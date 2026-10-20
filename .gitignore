@@ -58,3 +58,6 @@ build/
 *.bak
 *.swp
 *.swo
+
+# Service account credentials
+secrets/

@@ -111,6 +111,8 @@ const deliverFcm = async (tokens: string[], payload: PushPayload): Promise<void>
         notificationCount: payload.badge,
       },
     },
+    // Browsers: the web app's service worker shows it (see relun-web/public/sw.js).
+    webpush: { headers: { Urgency: 'high' } },
   });
 
   // Same idea as Expo's DeviceNotRegistered: drop tokens of uninstalled apps.

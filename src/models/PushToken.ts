@@ -1,12 +1,13 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
 
-// 'expo' tokens come from the Expo app, 'fcm' tokens from the native Android app.
+// 'expo' tokens come from the Expo app, 'fcm' tokens from the native Android app
+// and from browsers (web push through Firebase Cloud Messaging).
 export type PushProvider = 'expo' | 'fcm';
 
 export interface IPushToken extends Document {
   userId: Types.ObjectId;
   token: string;
-  platform?: 'ios' | 'android';
+  platform?: 'ios' | 'android' | 'web';
   provider: PushProvider;
   createdAt: Date;
   updatedAt: Date;
@@ -18,7 +19,7 @@ const pushTokenSchema = new Schema<IPushToken>(
     // Unique on the token, not on (user, token): a device handed to another
     // account must move rather than end up delivering to both.
     token: { type: String, required: true, unique: true },
-    platform: { type: String, enum: ['ios', 'android'] },
+    platform: { type: String, enum: ['ios', 'android', 'web'] },
     provider: { type: String, enum: ['expo', 'fcm'], default: 'expo' },
   },
   { timestamps: true }

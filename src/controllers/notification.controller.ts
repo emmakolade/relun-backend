@@ -35,7 +35,7 @@ export const registerPushToken = async (req: AuthRequest, res: Response): Promis
         token,
         userId,
         provider: resolvedProvider,
-        platform: platform === 'ios' || platform === 'android' ? platform : undefined,
+        platform: platform === 'ios' || platform === 'android' || platform === 'web' ? platform : undefined,
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
