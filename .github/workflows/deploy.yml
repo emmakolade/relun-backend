@@ -28,7 +28,11 @@ jobs:
           ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_HOST }} 'bash -se' <<'EOF'
           set -euo pipefail
           cd ~/relun-backend
-          git pull --ff-only origin main
+          # The server is a deploy target, not a workspace: make tracked files match main exactly,
+          # discarding any edits made on the box (e.g. an `npm install` rewriting package-lock.json).
+          # Untracked and ignored files such as .env and secrets/ are left alone.
+          git fetch origin main
+          git reset --hard origin/main
           npm ci --no-audit --no-fund
           npm run build
           pm2 restart relun-api --update-env
