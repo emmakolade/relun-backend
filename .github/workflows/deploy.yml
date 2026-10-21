@@ -1,0 +1,46 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never run two deploys at once; a newer push waits for the current one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Pull, build and restart
+        run: |
+          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_HOST }} 'bash -se' <<'EOF'
+          set -euo pipefail
+          cd ~/relun-backend
+          git pull --ff-only origin main
+          npm ci --no-audit --no-fund
+          npm run build
+          pm2 restart relun-api --update-env
+          pm2 save
+          EOF
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS https://api.relun.chat/health; then
+              echo; echo "Deploy healthy"; exit 0
+            fi
+            sleep 5
+          done
+          echo "Health check failed after deploy"; exit 1
