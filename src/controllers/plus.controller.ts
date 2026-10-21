@@ -3,7 +3,7 @@ import { Response } from 'express';
 import { validationResult } from 'express-validator';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { User } from '../models/User';
-import { Plus } from '../models/Plus';
+import { Plus, PlusPayment } from '../models/Plus';
 import {
   PLUS_ACTIVE_DATES,
   PLUS_MONTHLY_REQUESTS,
@@ -97,7 +97,7 @@ const creditPlusCharge = async (tx: PaystackTransaction): Promise<PlusCredit> =>
 
   const meta = metadataOf(tx);
   const plan = findPlusPlan(meta.plan);
-  if (meta.kind !== 'plus' || !meta.userId || !plan) {
+  if (meta.kind !== 'plus' || typeof meta.userId !== 'string' || !plan) {
     return { ok: false, status: 400, error: 'Unknown purchase' };
   }
   if (tx.amount !== plan.amount || tx.currency !== plan.currency) {
@@ -202,6 +202,7 @@ type PaystackEvent = {
   event?: string;
   data?: {
     reference?: string;
+    transaction_reference?: string;
     subscription_code?: string;
     email_token?: string;
     customer?: { customer_code?: string; email?: string };
@@ -243,7 +244,7 @@ export const handlePlusWebhook = async (event: PaystackEvent): Promise<boolean> 
     const plan = findPlusPlanByPaystackCode(planCodeOf(tx));
     if (!plan) return false;
     const userId = await userForCustomer(tx.customer);
-    if (!userId || tx.status !== 'success' || tx.amount !== plan.amount) {
+    if (!userId || tx.status !== 'success' || tx.amount !== plan.amount || tx.currency !== plan.currency) {
       console.warn('[paystack] Plus renewal not granted', tx.reference, userId, tx.amount);
       return true;
     }
@@ -273,6 +274,23 @@ export const handlePlusWebhook = async (event: PaystackEvent): Promise<boolean> 
         },
       }
     );
+    return true;
+  }
+
+  if (event.event === 'refund.processed' && data.transaction_reference) {
+    // Claimed once, so a repeated webhook can't take the days back twice.
+    const payment = await PlusPayment.findOneAndUpdate(
+      { reference: `paystack:${String(data.transaction_reference)}`, refundedAt: { $exists: false } },
+      { $set: { refundedAt: new Date() } }
+    ).lean();
+    if (!payment) return false;
+    const plan = findPlusPlan(payment.plan);
+    const plus = await Plus.findOne({ userId: payment.userId });
+    if (plan && plus) {
+      // Removes the refunded period, never ending earlier than now.
+      plus.until = new Date(Math.max(Date.now(), plus.until.getTime() - plan.days * DAY_MS));
+      await plus.save();
+    }
     return true;
   }
 
@@ -311,26 +329,39 @@ export const confirmPlayPlus = async (req: AuthRequest, res: Response): Promise<
       res.status(402).json({ error: result.reason, code: 'PURCHASE_NOT_VERIFIED' });
       return;
     }
-    if (result.productId && result.productId !== PLUS_PRODUCT_ID) {
+    // expiry is null only when verification was skipped in development.
+    const verified = result.expiry !== null;
+    if (verified ? result.productId !== PLUS_PRODUCT_ID : result.productId && result.productId !== PLUS_PRODUCT_ID) {
       res.status(400).json({ error: 'Unknown subscription' });
       return;
     }
 
     // Google says which base plan was bought; the app's word is only used
     // when verification is skipped in development.
-    const plan = findPlusPlanByPlayBasePlan(result.basePlanId) ?? findPlusPlanByPlayBasePlan(req.body.basePlanId);
+    const plan = verified
+      ? findPlusPlanByPlayBasePlan(result.basePlanId)
+      : findPlusPlanByPlayBasePlan(String(req.body.basePlanId ?? ''));
     if (!plan) {
       res.status(400).json({ error: 'Unknown plan' });
       return;
     }
 
-    await setPlayPlus({
-      userId,
-      plan: plan.id,
-      until: result.expiry ?? new Date(Date.now() + plan.days * DAY_MS),
-      autoRenew: result.autoRenew,
-      purchaseToken,
-    });
+    try {
+      await setPlayPlus({
+        userId,
+        plan: plan.id,
+        until: result.expiry ?? new Date(Date.now() + plan.days * DAY_MS),
+        autoRenew: result.autoRenew,
+        purchaseToken,
+      });
+    } catch (error) {
+      // The unique token index: another account claimed it at the same moment.
+      if ((error as { code?: number }).code === 11000) {
+        res.status(409).json({ error: 'This subscription belongs to another account' });
+        return;
+      }
+      throw error;
+    }
     res.json(await entitlements(userId));
   } catch (error) {
     console.error('Confirm Play Plus error:', error);

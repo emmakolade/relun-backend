@@ -7,7 +7,7 @@ import {
   MESSAGE_TYPES,
   MessageType,
 } from '../models/Message';
-import { getMatchedUserIds } from '../models/Like';
+import { getMatchedUserIds, isMatched } from '../models/Like';
 import { canViewConversation, resolveSendAccess, CHAT_ACCESS_ERRORS } from '../services/access.service';
 import { User } from '../models/User';
 import {
@@ -29,6 +29,24 @@ interface AuthenticatedSocket extends Socket {
 const isValidObjectId = (id: unknown): id is string =>
   typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id);
 
+const safeClientId = (value: unknown): string | undefined =>
+  typeof value === 'string' ? value.slice(0, 64) : undefined;
+
+// Per-socket flood control: at most `max` events in a sliding `windowMs`.
+const createRateLimiter = (max: number, windowMs: number) => {
+  const hits: number[] = [];
+  return (): boolean => {
+    const now = Date.now();
+    while (hits.length > 0 && now - hits[0] > windowMs) hits.shift();
+    if (hits.length >= max) return false;
+    hits.push(now);
+    return true;
+  };
+};
+
+// setTimeout overflows above ~24.8 days.
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
 // Presence is only shared with people the user has matched with, so it is
 // pushed into each match's personal room rather than broadcast to everyone.
 const broadcastPresence = async (io: Server, userId: string, isOnline: boolean) => {
@@ -48,16 +66,29 @@ export const initializeSocketIO = (io: Server) => {
   // Authentication middleware
   io.use(async (socket: AuthenticatedSocket, next) => {
     try {
-      const token =
-        socket.handshake.auth.token ||
+      const raw =
+        socket.handshake.auth?.token ||
         socket.handshake.headers.authorization?.replace('Bearer ', '');
+      const token = typeof raw === 'string' ? raw : '';
 
       if (!token) {
         return next(new Error('Authentication token required'));
       }
 
-      const decoded = verifyToken(token);
+      const decoded = verifyToken(token) as { userId?: unknown; exp?: number };
+      if (!isValidObjectId(decoded.userId)) {
+        return next(new Error('Invalid token'));
+      }
+
+      // Same checks as the REST authenticate middleware: deleted or
+      // deactivated accounts can't open a socket with an old token.
+      const user = await User.findById(decoded.userId).select('isActive').lean();
+      if (!user || !user.isActive) {
+        return next(new Error('Invalid token'));
+      }
+
       socket.userId = decoded.userId;
+      (socket.data as { tokenExp?: number }).tokenExp = decoded.exp;
       next();
     } catch (error) {
       next(new Error('Invalid token'));
@@ -74,6 +105,20 @@ export const initializeSocketIO = (io: Server) => {
 
     console.log('[User connected]====>>', userId);
 
+    // A socket outliving its token would keep the session alive forever.
+    const tokenExp = (socket.data as { tokenExp?: number }).tokenExp;
+    const expiryTimer =
+      typeof tokenExp === 'number'
+        ? setTimeout(
+            () => socket.disconnect(true),
+            Math.min(Math.max(tokenExp * 1000 - Date.now(), 0), MAX_TIMEOUT_MS)
+          )
+        : null;
+
+    const allowSend = createRateLimiter(20, 10_000);
+    const allowTyping = createRateLimiter(30, 10_000);
+    const allowJoin = createRateLimiter(30, 10_000);
+
     // Update user's online status
     User.findByIdAndUpdate(userId, { lastActive: new Date() }).catch(console.error);
 
@@ -87,6 +132,7 @@ export const initializeSocketIO = (io: Server) => {
     // Join conversation room
     socket.on('join_conversation', async (recipientId: string) => {
       try {
+        if (!allowJoin()) return;
         if (!isValidObjectId(recipientId)) {
           socket.emit('error', { message: 'Invalid recipient' });
           return;
@@ -103,12 +149,15 @@ export const initializeSocketIO = (io: Server) => {
         socket.join(`conversation:${conversationId}`);
 
         // Seed the opener with the current state; later changes arrive as
-        // presence_changed on the user's own room.
-        const presenceEvent: SocketPresenceEvent = {
-          userId: recipientId,
-          isOnline: isUserOnline(recipientId),
-        };
-        socket.emit('presence_changed', presenceEvent);
+        // presence_changed on the user's own room. Presence is for matches
+        // only, so a message request doesn't reveal whether they're online.
+        if (await isMatched(userId, recipientId)) {
+          const presenceEvent: SocketPresenceEvent = {
+            userId: recipientId,
+            isOnline: isUserOnline(recipientId),
+          };
+          socket.emit('presence_changed', presenceEvent);
+        }
 
         console.log(`User ${userId} joined conversation ${conversationId}`);
       } catch (error) {
@@ -119,15 +168,28 @@ export const initializeSocketIO = (io: Server) => {
 
     // Leave conversation room
     socket.on('leave_conversation', (recipientId: string) => {
-      if (!isValidObjectId(recipientId)) return;
-      const conversationId = getConversationId(userId, recipientId);
-      socket.leave(`conversation:${conversationId}`);
-      console.log(`User ${userId} left conversation ${conversationId}`);
+      try {
+        if (!isValidObjectId(recipientId)) return;
+        const conversationId = getConversationId(userId, recipientId);
+        socket.leave(`conversation:${conversationId}`);
+        console.log(`User ${userId} left conversation ${conversationId}`);
+      } catch (error) {
+        console.error('Leave conversation error:', error);
+      }
     });
 
     // Send message
     socket.on('send_message', async (data: SocketSendMessageData) => {
       try {
+        if (!allowSend()) {
+          socket.emit('error', {
+            message: 'You are sending messages too fast',
+            code: 'RATE_LIMITED',
+            clientId: safeClientId(data?.clientId),
+          });
+          return;
+        }
+
         const { recipientId, messageType = 'text' } = data ?? {};
         const content = typeof data?.content === 'string' ? data.content.trim() : '';
 
@@ -160,7 +222,7 @@ export const initializeSocketIO = (io: Server) => {
           socket.emit('error', {
             message: CHAT_ACCESS_ERRORS[access],
             code: access.toUpperCase(),
-            clientId: data?.clientId,
+            clientId: safeClientId(data?.clientId),
           });
           return;
         }
@@ -178,7 +240,7 @@ export const initializeSocketIO = (io: Server) => {
         const newMessageEvent: SocketNewMessageEvent = {
           conversationId,
           message: message.toJSON() as any,
-          clientId: typeof data?.clientId === 'string' ? data.clientId.slice(0, 64) : undefined,
+          clientId: safeClientId(data?.clientId),
         };
 
         // Emit to conversation room
@@ -200,14 +262,21 @@ export const initializeSocketIO = (io: Server) => {
 
     // Typing indicator
     socket.on('typing', (data: SocketTypingData) => {
-      const { recipientId, isTyping } = data ?? {};
-      if (!isValidObjectId(recipientId)) return;
+      try {
+        if (!allowTyping()) return;
+        const { recipientId, isTyping } = data ?? {};
+        if (!isValidObjectId(recipientId)) return;
 
-      // No match check: only members of the room receive this, and join_conversation
-      // already gates membership.
-      const conversationId = getConversationId(userId, recipientId);
-      const typingEvent: SocketUserTypingEvent = { userId, isTyping: !!isTyping };
-      socket.to(`conversation:${conversationId}`).emit('user_typing', typingEvent);
+        // No match check per keystroke: the sender must have joined the room,
+        // and join_conversation gates membership.
+        const conversationId = getConversationId(userId, recipientId);
+        const room = `conversation:${conversationId}`;
+        if (!socket.rooms.has(room)) return;
+        const typingEvent: SocketUserTypingEvent = { userId, isTyping: !!isTyping };
+        socket.to(room).emit('user_typing', typingEvent);
+      } catch (error) {
+        console.error('Typing error:', error);
+      }
     });
 
     // Mark messages as read
@@ -225,9 +294,11 @@ export const initializeSocketIO = (io: Server) => {
           { $set: { isRead: true, readAt: new Date() } }
         );
 
-        // Notify sender
+        // Notify sender, but only through a room this socket was let into.
+        const room = `conversation:${conversationId}`;
+        if (!socket.rooms.has(room)) return;
         const readEvent: SocketMessagesReadEvent = { conversationId, readBy: userId };
-        socket.to(`conversation:${conversationId}`).emit('messages_read', readEvent);
+        socket.to(room).emit('messages_read', readEvent);
       } catch (error) {
         console.error('Mark read error:', error);
       }
@@ -235,6 +306,7 @@ export const initializeSocketIO = (io: Server) => {
 
     // Handle disconnect
     socket.on('disconnect', () => {
+      if (expiryTimer) clearTimeout(expiryTimer);
       console.log('User disconnected:', userId);
       User.findByIdAndUpdate(userId, { lastActive: new Date() }).catch(console.error);
 

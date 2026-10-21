@@ -100,10 +100,15 @@ export const browseDates = async (req: AuthRequest, res: Response): Promise<void
 export const myDates = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user!.id;
-    const posts = await DatePost.find({ userId, status: 'active' })
-      .sort({ scheduledFor: 1 })
-      .lean();
-    const requests = await DateRequest.find({ dateId: { $in: posts.map((p) => p._id) } })
+    const [posts, blockedIds] = await Promise.all([
+      DatePost.find({ userId, status: 'active' }).sort({ scheduledFor: 1 }).lean(),
+      getBlockedUserIds(userId),
+    ]);
+    // Requests from people blocked either way since don't show.
+    const requests = await DateRequest.find({
+      dateId: { $in: posts.map((p) => p._id) },
+      requesterId: { $nin: blockedIds.map((id) => new Types.ObjectId(id)) },
+    })
       .sort({ createdAt: 1 })
       .lean();
 
@@ -193,6 +198,11 @@ export const createDate = async (req: AuthRequest, res: Response): Promise<void>
 // DELETE /api/dates/:dateId
 export const deleteDate = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    if (!validId(req.params.dateId)) {
+      res.status(404).json({ error: 'Date not found' });
+      return;
+    }
+
     const result = await DatePost.updateOne(
       { _id: req.params.dateId, userId: req.user!.id, status: 'active' },
       { status: 'cancelled' }
@@ -272,16 +282,27 @@ export const respondToRequest = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
+    if (!validId(dateId) || !validId(requestId)) {
+      res.status(404).json({ error: 'Request not found' });
+      return;
+    }
+
     const request = await DateRequest.findOne({ _id: requestId, dateId, ownerId: userId });
     if (!request) {
       res.status(404).json({ error: 'Request not found' });
       return;
     }
 
+    const requesterId = request.requesterId.toString();
+
+    // A block since the request means accepting must not create a match.
+    if (status === 'accepted' && (await isBlockedEitherWay(userId, requesterId))) {
+      res.status(404).json({ error: 'Request not found' });
+      return;
+    }
+
     request.status = status;
     await request.save();
-
-    const requesterId = request.requesterId.toString();
 
     if (status === 'accepted') {
       // Accepting makes them a match, which opens the chat, so "Chatting" works at once.

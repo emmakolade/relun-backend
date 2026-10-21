@@ -26,7 +26,6 @@ export const authenticate = async (
 
     const token = authHeader.substring(7);
     const decoded = verifyToken(token) as { userId: string };
-    console.log('[AUTH] Decoded token:', { userId: decoded.userId });
 
     const user = await User.findById(decoded.userId).select('email phone isActive');
 
@@ -50,11 +49,11 @@ export const authenticate = async (
 
     next();
   } catch (error) {
-    console.error('[AUTH] Token verification error:', error);
-    if (error instanceof jwt.JsonWebTokenError) {
-      res.status(401).json({ error: 'Invalid token format' });
-    } else if (error instanceof jwt.TokenExpiredError) {
+    // TokenExpiredError extends JsonWebTokenError, so check it first.
+    if (error instanceof jwt.TokenExpiredError) {
       res.status(401).json({ error: 'Token expired' });
+    } else if (error instanceof jwt.JsonWebTokenError) {
+      res.status(401).json({ error: 'Invalid token format' });
     } else {
       res.status(401).json({ error: 'Invalid token' });
     }

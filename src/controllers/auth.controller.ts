@@ -1,9 +1,12 @@
 import { Request, Response } from 'express';
 import { validationResult } from 'express-validator';
-import { generateTokenPair } from '../utils/jwt.utils';
+import { generateTokenPair, verifyRefreshToken } from '../utils/jwt.utils';
 import {
   generateOTP,
   getOTPExpiry,
+  OTP_TTL_MINUTES,
+  OTP_MAX_ATTEMPTS,
+  OTP_RESEND_SECONDS,
   sendOTPEmail,
   sendOTPSMS,
   verifyOTP as verifyOTPUtil,
@@ -22,9 +25,18 @@ import {
   RequestOTPRequest,
   RequestOTPResponse,
   VerifyOTPRequest,
-  LoginRequest,
   LoginResponse,
 } from '../types';
+
+// Sign-in uses exactly one of email or phone, so a code sent to one can't verify the other.
+const contactQuery = (email?: string, phone?: string) => (email ? { email } : { phone });
+
+// The user as returned to its owner, without OTP state.
+const ownUser = (user: IUser) => {
+  const { otpCode: _otpCode, otpExpiry: _otpExpiry, otpAttempts: _otpAttempts, ...rest } =
+    user.toObject();
+  return rest;
+};
 
 export const requestOTP = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -36,31 +48,45 @@ export const requestOTP = async (req: Request, res: Response): Promise<void> => 
 
     const { email, phone }: RequestOTPRequest = req.body;
 
-    if (!email && !phone) {
-      res.status(400).json({ error: 'Email or phone is required' });
+    if (!email === !phone) {
+      res.status(400).json({ error: 'Provide either an email or a phone number' });
       return;
     }
 
     const otp = generateOTP();
     const otpExpiry = getOTPExpiry();
 
-    const queryConditions = [];
-    if (email) queryConditions.push({ email });
-    if (phone) queryConditions.push({ phone });
+    let user: IUser | null = await User.findOne(contactQuery(email, phone)).select('+otpExpiry');
 
-    let user: IUser | null = await User.findOne({
-      $or: queryConditions,
-    });
+    // An email or phone added to another account during onboarding is unverified. Its real
+    // owner signing in must get their own account, not the one that claimed their contact.
+    if (
+      user &&
+      ((phone && !user.isPhoneVerified && user.isEmailVerified) ||
+        (email && !user.isEmailVerified && user.isPhoneVerified))
+    ) {
+      await User.updateOne({ _id: user._id }, { $unset: email ? { email: '' } : { phone: '' } });
+      user = null;
+    }
 
     if (user) {
+      const lastSentAt = user.otpExpiry
+        ? user.otpExpiry.getTime() - OTP_TTL_MINUTES * 60 * 1000
+        : 0;
+      if (Date.now() - lastSentAt < OTP_RESEND_SECONDS * 1000) {
+        res.status(429).json({ error: 'Please wait a minute before requesting another code' });
+        return;
+      }
       user.otpCode = otp;
       user.otpExpiry = otpExpiry;
+      user.otpAttempts = 0;
       await user.save();
     } else {
       user = await User.create({
         email,
         phone,
         otpCode: otp,
+        otpAttempts: 0,
         otpExpiry,
         coins: SIGNUP_BONUS_COINS,
       });
@@ -98,95 +124,6 @@ export const requestOTP = async (req: Request, res: Response): Promise<void> => 
   }
 };
 
-export const login = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
-
-    const { email, phone }: LoginRequest = req.body;
-
-    if (!email && !phone) {
-      res.status(400).json({ error: 'Email or phone is required' });
-      return;
-    }
-
-    const queryConditions = [];
-    if (email) queryConditions.push({ email });
-    if (phone) queryConditions.push({ phone });
-
-    const user = await User.findOne({
-      $or: queryConditions,
-    });
-
-    if (!user) {
-      res.status(404).json({ error: "This user doesn't exist" });
-      return;
-    }
-
-    if (email && !user.isEmailVerified) {
-      res.status(403).json({ error: 'Email not verified. Please verify.' });
-      return;
-    }
-
-    if (phone && !user.isPhoneVerified) {
-      res.status(403).json({ error: 'Phone not verified. Please verify.' });
-      return;
-    }
-
-    if (!user.isActive) {
-      res.status(403).json({ error: 'Account is disabled' });
-      return;
-    }
-
-    user.lastActive = new Date();
-    await user.save();
-
-    const tokens = generateTokenPair({
-      userId: user._id.toString(),
-      email: user.email || undefined,
-      phone: user.phone || undefined,
-    });
-
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + 30);
-
-    await RefreshToken.create({
-      token: tokens.refreshToken,
-      userId: user._id,
-      expiresAt: expiryDate,
-    });
-
-    const profile = await Profile.findOne({ userId: user._id }).select(
-      'bio city segment isComplete completenessScore'
-    );
-
-    const needsProfileCompletion =
-      !user.fullName || !user.dateOfBirth || !user.gender || !profile?.segment;
-    const needsEmail = !user.email;
-    const needsPhone = !user.phone;
-
-    const response: LoginResponse = {
-      ...tokens,
-      user: {
-        ...user.toObject(),
-        id: user._id.toString(),
-        profile: profile?.toObject(),
-      },
-      needsProfileCompletion,
-      needsEmail,
-      needsPhone,
-    };
-
-    res.json(response);
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ error: 'Login failed' });
-  }
-};
-
 export const verifyOTP = async (req: Request, res: Response): Promise<void> => {
   try {
     const errors = validationResult(req);
@@ -197,26 +134,26 @@ export const verifyOTP = async (req: Request, res: Response): Promise<void> => {
 
     const { email, phone, otp }: VerifyOTPRequest = req.body;
 
-    if (!email && !phone) {
-      res.status(400).json({ error: 'Email or phone is required' });
+    if (!email === !phone) {
+      res.status(400).json({ error: 'Provide either an email or a phone number' });
       return;
     }
 
-    const queryConditions = [];
-    if (email) queryConditions.push({ email });
-    if (phone) queryConditions.push({ phone });
+    // Count the attempt before checking it, so parallel guesses can't exceed the limit.
+    const user = await User.findOneAndUpdate(
+      { ...contactQuery(email, phone), otpCode: { $exists: true } },
+      { $inc: { otpAttempts: 1 } },
+      { new: true }
+    ).select('+otpCode +otpExpiry +otpAttempts');
 
-    const user = await User.findOne({
-      $or: queryConditions,
-    });
-
-    if (!user) {
-      res.status(404).json({ error: 'User not found' });
-      return;
-    }
-
-    if (!user.otpCode || !user.otpExpiry) {
+    if (!user || !user.otpCode || !user.otpExpiry) {
       res.status(400).json({ error: 'No OTP requested. Please request OTP first.' });
+      return;
+    }
+
+    if ((user.otpAttempts ?? 0) > OTP_MAX_ATTEMPTS) {
+      await User.updateOne({ _id: user._id }, { $unset: { otpCode: '', otpExpiry: '' } });
+      res.status(429).json({ error: 'Too many attempts. Please request a new code.' });
       return;
     }
 
@@ -241,6 +178,7 @@ export const verifyOTP = async (req: Request, res: Response): Promise<void> => {
 
     user.otpCode = undefined;
     user.otpExpiry = undefined;
+    user.otpAttempts = undefined;
 
     user.lastActive = new Date();
     await user.save();
@@ -274,7 +212,7 @@ export const verifyOTP = async (req: Request, res: Response): Promise<void> => {
     const response: LoginResponse & { photoCount: number } = {
       ...tokens,
       user: {
-        ...user.toObject(),
+        ...ownUser(user),
         id: user._id.toString(),
         profile: profile?.toObject(),
       },
@@ -332,14 +270,23 @@ export const logout = async (req: AuthRequest, res: Response): Promise<void> => 
 
 export const refreshToken = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { refreshToken } = req.body;
-
-    if (!refreshToken) {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
       res.status(400).json({ error: 'Refresh token is required' });
       return;
     }
 
-    const storedToken = await RefreshToken.findOne({ token: refreshToken }).populate('userId');
+    const { refreshToken } = req.body as { refreshToken: string };
+
+    try {
+      verifyRefreshToken(refreshToken);
+    } catch {
+      res.status(401).json({ error: 'Invalid or expired refresh token' });
+      return;
+    }
+
+    // Deleting as we read makes each refresh token single-use, even under concurrent requests.
+    const storedToken = await RefreshToken.findOneAndDelete({ token: refreshToken });
 
     if (!storedToken || storedToken.expiresAt < new Date()) {
       res.status(401).json({ error: 'Invalid or expired refresh token' });
@@ -348,7 +295,7 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
 
     const user = await User.findById(storedToken.userId);
 
-    if (!user) {
+    if (!user || !user.isActive) {
       res.status(401).json({ error: 'User not found' });
       return;
     }
@@ -358,9 +305,6 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
       email: user.email || undefined,
       phone: user.phone || undefined,
     });
-
-    // Delete old refresh token and create new one
-    await RefreshToken.deleteOne({ token: refreshToken });
 
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 30);

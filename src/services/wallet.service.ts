@@ -22,6 +22,8 @@ type SpendParams = {
  * so two taps on "Unlock" can never both succeed on a balance that covers one.
  */
 export const spendCoins = async ({ userId, amount, reason, refId }: SpendParams) => {
+  // A negative amount would pass the balance check and add coins.
+  if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('Invalid coin amount');
   const user = await User.findOneAndUpdate(
     { _id: userId, coins: { $gte: amount } },
     { $inc: { coins: -amount } },
@@ -60,6 +62,10 @@ type CreditParams = {
  * Returns null if this purchase token was already credited.
  */
 export const creditCoins = async (params: CreditParams): Promise<number | null> => {
+  // Only a refund of a store purchase may take coins back.
+  if (!Number.isSafeInteger(params.amount) || (params.amount < 0 && !params.purchaseToken)) {
+    throw new Error('Invalid coin amount');
+  }
   let transactionId;
 
   try {

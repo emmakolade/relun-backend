@@ -38,9 +38,9 @@ export const joinWaitlist = async (req: Request, res: Response): Promise<void> =
       res.status(400).json({ error: 'Enter a valid email address' });
       return;
     }
-    // Behind a load balancer req.ip is the proxy, which would put every visitor in one bucket.
-    const forwarded = req.headers['x-forwarded-for'];
-    const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '') || req.ip || 'unknown';
+    // req.ip honours the app's 'trust proxy' setting. Reading X-Forwarded-For
+    // directly would let anyone dodge the limit by sending a fake header.
+    const ip = req.ip || 'unknown';
     if (limited(ip)) {
       res.status(429).json({ error: 'Too many sign-ups. Try again later.' });
       return;

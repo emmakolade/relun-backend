@@ -9,15 +9,20 @@ import { GoogleAuth } from 'google-auth-library';
  *   GOOGLE_PLAY_SERVICE_ACCOUNT_PATH path to a service-account JSON key that
  *                                    has access in Play Console > API access
  *
- * Without the key, purchases are accepted unverified outside production only,
- * so testing on an emulator works but a production server never mints coins
- * for an unchecked token.
+ * Without the key, purchases are rejected unless PLAY_BILLING_ALLOW_UNVERIFIED=true
+ * is set outside production, so testing on an emulator still works but a server
+ * that forgot NODE_ENV never mints coins for an unchecked token.
+ *
+ * Verified purchases are acknowledged here too: Google refunds anything left
+ * unacknowledged for three days, and a modified app could skip that step to
+ * keep the coins and get its money back.
  */
 
 type ProductPurchase = {
   purchaseState?: number; // 0 purchased, 1 cancelled, 2 pending
   consumptionState?: number; // 0 not yet consumed, 1 consumed
   orderId?: string;
+  acknowledgementState?: number; // 0 yet to be acknowledged, 1 acknowledged
 };
 
 export type VerifyResult = { ok: true; orderId?: string } | { ok: false; reason: string };
@@ -38,6 +43,11 @@ const getAuth = (): GoogleAuth | null => {
   return auth;
 };
 
+const allowUnverified = (): boolean =>
+  process.env.NODE_ENV !== 'production' && process.env.PLAY_BILLING_ALLOW_UNVERIFIED === 'true';
+
+const PUBLISHER_API = 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/';
+
 export const verifyPlayPurchase = async (
   productId: string,
   purchaseToken: string
@@ -46,7 +56,7 @@ export const verifyPlayPurchase = async (
   const packageName = process.env.ANDROID_PACKAGE_NAME || 'com.relun.app';
 
   if (!googleAuth) {
-    if (process.env.NODE_ENV === 'production') {
+    if (!allowUnverified()) {
       return { ok: false, reason: 'Purchase verification is not configured' };
     }
     console.warn(
@@ -58,7 +68,7 @@ export const verifyPlayPurchase = async (
   try {
     const client = await googleAuth.getClient();
     const url =
-      `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/` +
+      PUBLISHER_API +
       `${encodeURIComponent(packageName)}/purchases/products/${encodeURIComponent(productId)}` +
       `/tokens/${encodeURIComponent(purchaseToken)}`;
 
@@ -67,6 +77,13 @@ export const verifyPlayPurchase = async (
 
     if (purchase.purchaseState !== 0) {
       return { ok: false, reason: 'Purchase is not completed' };
+    }
+
+    // The app still consumes it afterwards; consuming works on an acknowledged purchase.
+    if (purchase.acknowledgementState === 0 && purchase.consumptionState !== 1) {
+      await client.request({ url: `${url}:acknowledge`, method: 'POST', data: {} }).catch((error) => {
+        console.error('[billing] Play acknowledge failed:', error);
+      });
     }
 
     return { ok: true, orderId: purchase.orderId };
@@ -80,6 +97,7 @@ type SubscriptionPurchaseV2 = {
   // SUBSCRIPTION_STATE_ACTIVE, _IN_GRACE_PERIOD, _ON_HOLD, _CANCELED, _EXPIRED, ...
   subscriptionState?: string;
   latestOrderId?: string;
+  acknowledgementState?: string; // ACKNOWLEDGEMENT_STATE_PENDING, _ACKNOWLEDGED
   lineItems?: {
     productId?: string;
     expiryTime?: string;
@@ -100,6 +118,14 @@ export type SubscriptionResult =
     }
   | { ok: false; reason: string };
 
+// States where the subscriber has paid for the current period. A cancelled
+// subscription still counts until its expiry.
+const PAID_STATES = [
+  'SUBSCRIPTION_STATE_ACTIVE',
+  'SUBSCRIPTION_STATE_IN_GRACE_PERIOD',
+  'SUBSCRIPTION_STATE_CANCELED',
+];
+
 /**
  * Checks a Google Play subscription (Relun Plus) with the subscriptionsv2 API.
  * A cancelled subscription still counts until its expiry; Google keeps the
@@ -110,7 +136,7 @@ export const verifyPlaySubscription = async (purchaseToken: string): Promise<Sub
   const packageName = process.env.ANDROID_PACKAGE_NAME || 'com.relun.app';
 
   if (!googleAuth) {
-    if (process.env.NODE_ENV === 'production') {
+    if (!allowUnverified()) {
       return { ok: false, reason: 'Purchase verification is not configured' };
     }
     console.warn('[billing] GOOGLE_PLAY_SERVICE_ACCOUNT_PATH not set; accepting unverified subscription');
@@ -120,7 +146,7 @@ export const verifyPlaySubscription = async (purchaseToken: string): Promise<Sub
   try {
     const client = await googleAuth.getClient();
     const url =
-      `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/` +
+      PUBLISHER_API +
       `${encodeURIComponent(packageName)}/purchases/subscriptionsv2/tokens/${encodeURIComponent(purchaseToken)}`;
 
     const response = await client.request<SubscriptionPurchaseV2>({ url });
@@ -128,8 +154,18 @@ export const verifyPlaySubscription = async (purchaseToken: string): Promise<Sub
     const item = sub.lineItems?.[0];
     const expiry = item?.expiryTime ? new Date(item.expiryTime) : null;
 
-    if (!expiry || sub.subscriptionState === 'SUBSCRIPTION_STATE_PENDING') {
+    if (!expiry || !item?.productId || !PAID_STATES.includes(sub.subscriptionState ?? '')) {
       return { ok: false, reason: 'Subscription is not active' };
+    }
+
+    if (sub.acknowledgementState === 'ACKNOWLEDGEMENT_STATE_PENDING') {
+      const ackUrl =
+        PUBLISHER_API +
+        `${encodeURIComponent(packageName)}/purchases/subscriptions/${encodeURIComponent(item.productId)}` +
+        `/tokens/${encodeURIComponent(purchaseToken)}:acknowledge`;
+      await client.request({ url: ackUrl, method: 'POST', data: {} }).catch((error) => {
+        console.error('[billing] Play subscription acknowledge failed:', error);
+      });
     }
 
     return {

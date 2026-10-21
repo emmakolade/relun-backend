@@ -1,13 +1,18 @@
+import crypto from 'crypto';
 import { sendEmail } from '../services/email.service';
 import { otpEmail } from '../services/emailTemplates';
 import { sendSMS } from '../services/sms.service';
 
 // Generate a 6-digit OTP
 export const generateOTP = (): string => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return crypto.randomInt(100000, 1000000).toString();
 };
 
 export const OTP_TTL_MINUTES = 10;
+// Wrong guesses allowed before the code is thrown away.
+export const OTP_MAX_ATTEMPTS = 5;
+// Minimum gap between codes sent to the same email or phone.
+export const OTP_RESEND_SECONDS = 60;
 
 export const getOTPExpiry = (): Date => {
   const expiry = new Date();
@@ -34,5 +39,7 @@ export const verifyOTP = (storedOTP: string, providedOTP: string, expiry: Date):
   if (new Date() > expiry) {
     return false;
   }
-  return storedOTP === providedOTP;
+  const stored = Buffer.from(storedOTP);
+  const provided = Buffer.from(String(providedOTP));
+  return stored.length === provided.length && crypto.timingSafeEqual(stored, provided);
 };

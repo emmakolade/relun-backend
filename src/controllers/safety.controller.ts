@@ -35,6 +35,11 @@ export const blockUser = async (req: AuthRequest, res: Response): Promise<void> 
 // DELETE /api/safety/blocks/:userId
 export const unblockUser = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    if (!validId(req.params.userId)) {
+      res.status(400).json({ error: 'Invalid user id' });
+      return;
+    }
+
     await Block.deleteOne({ blockerId: req.user!.id, blockedId: req.params.userId });
     res.json({ blocked: false, userId: req.params.userId });
   } catch (error) {
@@ -92,6 +97,12 @@ export const reportUser = async (req: AuthRequest, res: Response): Promise<void>
 
     if (!REPORT_REASONS.includes(reason)) {
       res.status(400).json({ error: 'Invalid reason' });
+      return;
+    }
+
+    // One open report per pair is enough; repeats would only pile up junk for moderators.
+    if (await Report.exists({ reporterId, reportedId: userId, status: 'open' })) {
+      res.status(201).json({ reported: true });
       return;
     }
 

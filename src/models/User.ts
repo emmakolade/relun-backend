@@ -12,6 +12,7 @@ export interface IUser extends Document {
   lastActive?: Date;
   otpCode?: string;
   otpExpiry?: Date;
+  otpAttempts?: number;
   coins: number;
   insightsUntil?: Date;
   deletedAt?: Date;
@@ -30,8 +31,10 @@ const userSchema = new Schema<IUser>(
     isEmailVerified: { type: Boolean, default: false },
     isPhoneVerified: { type: Boolean, default: false },
     lastActive: { type: Date },
-    otpCode: { type: String },
-    otpExpiry: { type: Date },
+    // Never returned unless asked for with select('+otpCode ...').
+    otpCode: { type: String, select: false },
+    otpExpiry: { type: Date, select: false },
+    otpAttempts: { type: Number, select: false },
     // Coin balance. Only ever changed through services/wallet.service so every
     // change has a matching CoinTransaction row.
     coins: { type: Number, default: 0, min: 0 },

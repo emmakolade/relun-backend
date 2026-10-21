@@ -46,3 +46,20 @@ export const calculateDistance = (
 const toRad = (value: number): number => {
   return (value * Math.PI) / 180;
 };
+
+// Grid the other person's position is snapped to before measuring, about 1.1 km.
+const LOCATION_GRID_DEGREES = 0.01;
+const snap = (degrees: number) =>
+  Math.round(degrees / LOCATION_GRID_DEGREES) * LOCATION_GRID_DEGREES;
+
+/**
+ * Distance shown to a viewer, in whole km (at least 1). The other person's
+ * position is snapped to a grid first, so a viewer who spoofs their own
+ * location from several points can't triangulate anyone closer than ~1 km.
+ */
+export const displayDistanceKm = (
+  viewerLat: number,
+  viewerLon: number,
+  lat: number,
+  lon: number
+): number => Math.max(1, Math.round(calculateDistance(viewerLat, viewerLon, snap(lat), snap(lon))));

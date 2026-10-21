@@ -16,6 +16,7 @@ import {
   isPaystackConfigured,
   isValidWebhookSignature,
   metadataOf,
+  planCodeOf,
   verifyTransaction,
   PaystackTransaction,
 } from '../services/paystack.service';
@@ -162,10 +163,12 @@ const creditPaystack = async (tx: PaystackTransaction): Promise<PaystackCredit> 
     return { ok: false, status: 402, error: 'Payment was not completed' };
   }
 
-  const { userId, productId } = metadataOf(tx);
-  const pkg = productId ? findPackageByProductId(productId) : undefined;
+  const { userId, productId, kind } = metadataOf(tx);
+  const pkg = typeof productId === 'string' ? findPackageByProductId(productId) : undefined;
 
-  if (!userId || !pkg) {
+  // A Plus charge or subscription renewal is never also a coin purchase, even
+  // if its metadata names a pack at the same price.
+  if (typeof userId !== 'string' || !pkg || kind === 'plus' || planCodeOf(tx)) {
     return { ok: false, status: 400, error: 'Unknown purchase' };
   }
   if (tx.amount !== pkg.paystackAmount || tx.currency !== pkg.paystackCurrency) {
@@ -267,6 +270,27 @@ export const verifyPaystack = async (req: AuthRequest, res: Response): Promise<v
   }
 };
 
+/**
+ * Takes back the coins of a refunded Paystack charge, once. The balance may go
+ * below zero if they were already spent, which blocks further spending.
+ */
+const revokePaystackCoins = async (reference: string) => {
+  const purchase = await CoinTransaction.findOne({ purchaseToken: paystackToken(reference) })
+    .select('userId amount productId')
+    .lean();
+  if (!purchase || purchase.amount <= 0) return;
+
+  await creditCoins({
+    userId: purchase.userId.toString(),
+    amount: -purchase.amount,
+    reason: 'refund',
+    productId: purchase.productId,
+    platform: 'web',
+    purchaseToken: `paystack-refund:${reference}`,
+    refId: reference,
+  });
+};
+
 // POST /api/coins/paystack/webhook (called by Paystack, not the app)
 export const paystackWebhook = async (req: Request, res: Response): Promise<void> => {
   const raw = (req as Request & { rawBody?: Buffer }).rawBody;
@@ -279,9 +303,14 @@ export const paystackWebhook = async (req: Request, res: Response): Promise<void
   res.sendStatus(200);
 
   try {
-    const event = req.body as { event?: string; data?: { reference?: string } };
-    // Plus charges, renewals and subscription changes.
+    const event = req.body as { event?: string; data?: { reference?: string; transaction_reference?: string } };
+    // Plus charges, renewals, refunds and subscription changes.
     if (await handlePlusWebhook(event)) return;
+
+    if (event.event === 'refund.processed' && event.data?.transaction_reference) {
+      await revokePaystackCoins(String(event.data.transaction_reference));
+      return;
+    }
     if (event.event !== 'charge.success' || !event.data?.reference) return;
 
     // Re-fetch rather than trusting the payload's amount.

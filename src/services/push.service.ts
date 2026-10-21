@@ -250,22 +250,28 @@ export const notifyDateRequest = async (params: {
   requesterId: string;
   activity: string;
 }): Promise<void> => {
-  const requester = await User.findById(params.requesterId).select('fullName').lean();
-  const body = `${requester?.fullName?.split(' ')[0] || 'Someone'} wants to join "${params.activity}".`;
+  // Callers `void` this, so it must never reject (an unhandled rejection
+  // takes the process down).
+  try {
+    const requester = await User.findById(params.requesterId).select('fullName').lean();
+    const body = `${requester?.fullName?.split(' ')[0] || 'Someone'} wants to join "${params.activity}".`;
 
-  await addNotification({
-    userId: params.ownerId,
-    type: 'date_request',
-    actorId: params.requesterId,
-    title: 'New date request',
-    body,
-    data: { userId: params.requesterId },
-  });
-  await sendPushToUser(params.ownerId, {
-    title: 'New date request',
-    body,
-    data: { type: 'date_request', userId: params.requesterId },
-  });
+    await addNotification({
+      userId: params.ownerId,
+      type: 'date_request',
+      actorId: params.requesterId,
+      title: 'New date request',
+      body,
+      data: { userId: params.requesterId },
+    });
+    await sendPushToUser(params.ownerId, {
+      title: 'New date request',
+      body,
+      data: { type: 'date_request', userId: params.requesterId },
+    });
+  } catch (error) {
+    console.error('Notify date request error:', error);
+  }
 };
 
 export const notifyDateAccepted = async (params: {
@@ -273,22 +279,26 @@ export const notifyDateAccepted = async (params: {
   ownerId: string;
   activity: string;
 }): Promise<void> => {
-  const owner = await User.findById(params.ownerId).select('fullName').lean();
-  const body = `${owner?.fullName?.split(' ')[0] || 'They'} accepted you for "${params.activity}". Say hello!`;
+  try {
+    const owner = await User.findById(params.ownerId).select('fullName').lean();
+    const body = `${owner?.fullName?.split(' ')[0] || 'They'} accepted you for "${params.activity}". Say hello!`;
 
-  await addNotification({
-    userId: params.requesterId,
-    type: 'date_accepted',
-    actorId: params.ownerId,
-    title: 'Date accepted',
-    body,
-    data: { userId: params.ownerId },
-  });
-  await sendPushToUser(params.requesterId, {
-    title: 'Date accepted',
-    body,
-    data: { type: 'match', userId: params.ownerId },
-  });
+    await addNotification({
+      userId: params.requesterId,
+      type: 'date_accepted',
+      actorId: params.ownerId,
+      title: 'Date accepted',
+      body,
+      data: { userId: params.ownerId },
+    });
+    await sendPushToUser(params.requesterId, {
+      title: 'Date accepted',
+      body,
+      data: { type: 'match', userId: params.ownerId },
+    });
+  } catch (error) {
+    console.error('Notify date accepted error:', error);
+  }
 };
 
 /**

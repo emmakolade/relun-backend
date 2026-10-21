@@ -10,7 +10,8 @@ import 'dotenv/config';
 const num = (name: string, fallback: number): number => {
   const raw = process.env[name];
   const value = Number(raw);
-  return raw !== undefined && raw !== '' && Number.isFinite(value) ? value : fallback;
+  // Never negative: a negative price would turn a spend into a credit.
+  return raw !== undefined && raw !== '' && Number.isFinite(value) && value >= 0 ? value : fallback;
 };
 
 export const COIN_COSTS = {

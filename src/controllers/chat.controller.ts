@@ -27,7 +27,13 @@ const isValidObjectId = (id: string): boolean => mongoose.Types.ObjectId.isValid
 export const getMessages = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { recipientId } = req.params;
-    const { page = 1, limit = 50 } = req.query;
+    // Clamp: query values may be arrays, NaN, negative or huge.
+    const toInt = (value: unknown, fallback: number) => {
+      const n = Math.floor(Number(typeof value === 'string' ? value : NaN));
+      return Number.isFinite(n) && n > 0 ? n : fallback;
+    };
+    const page = Math.min(toInt(req.query.page, 1), 10_000);
+    const limit = Math.min(toInt(req.query.limit, 50), 100);
     const userId = req.user!.id;
 
     if (!isValidObjectId(recipientId)) {
@@ -87,8 +93,13 @@ export const sendMessage = async (req: AuthRequest, res: Response): Promise<void
     const { content, messageType = 'text' }: SendMessageRequest = req.body;
     const userId = req.user!.id;
 
-    if (!isValidObjectId(recipientId)) {
+    if (!isValidObjectId(recipientId) || recipientId === userId) {
       res.status(400).json({ error: 'Invalid recipient id' });
+      return;
+    }
+
+    if (typeof content !== 'string' || typeof messageType !== 'string') {
+      res.status(400).json({ error: 'Message content is required' });
       return;
     }
 
@@ -293,6 +304,11 @@ export const sendMessageRequest = async (req: AuthRequest, res: Response): Promi
 
     if (!isValidObjectId(recipientId) || recipientId === userId) {
       res.status(400).json({ error: 'Invalid recipient id' });
+      return;
+    }
+
+    if (typeof content !== 'string') {
+      res.status(400).json({ error: 'Message content is required' });
       return;
     }
 

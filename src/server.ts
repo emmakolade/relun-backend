@@ -6,7 +6,9 @@ import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import multer from 'multer';
 import { connectDB } from './config/database';
+import { rateLimit } from './middleware/rateLimit.middleware';
 
 // Configure Cloudinary after env vars are loaded
 import { configureCloudinary } from './services/cloudinary.service';
@@ -31,36 +33,66 @@ import { schedulePurgeDeletedAccounts } from './jobs/purgeDeletedAccounts';
 import { initializeSocketIO } from './socket/chat.socket';
 import { setIO } from './socket/io';
 
+const isProduction = process.env.NODE_ENV === 'production';
+
+// Browser origins allowed to call the API (comma-separated). The native apps send no Origin.
+const corsOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+if (isProduction && (corsOrigins.length === 0 || corsOrigins.includes('*'))) {
+  console.error('CORS_ORIGIN must list the web app origins in production, e.g. https://relun.app');
+  process.exit(1);
+}
+const corsOrigin = corsOrigins.length > 0 ? corsOrigins : '*';
+
 const app: Application = express();
+app.disable('x-powered-by');
+// Number of proxies in front of the API (load balancer, nginx), so req.ip is the client's
+// address for rate limiting. Set TRUST_PROXY=0 when clients connect directly.
+app.set('trust proxy', Number(process.env.TRUST_PROXY ?? 1));
 const httpServer = createServer(app);
 
 // Initialize Socket.IO
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: corsOrigin,
     credentials: true,
   },
+  maxHttpBufferSize: 1e6,
 });
 
 initializeSocketIO(io);
 setIO(io);
 
 // Middleware
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+  if (isProduction) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: corsOrigin,
     credentials: true,
   })
 );
+app.use('/api', rateLimit({ windowMs: 60 * 1000, max: 300 }));
 app.use(
   express.json({
+    limit: '100kb',
     // Paystack webhooks are signed over the exact bytes received.
     verify: (req, _res, buf) => {
       (req as Request & { rawBody?: Buffer }).rawBody = buf;
     },
   })
 );
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
 // Request logging middleware
 app.use((req: Request, _res: Response, next: NextFunction) => {
@@ -95,7 +127,16 @@ app.use((_req: Request, res: Response) => {
 });
 
 // Error handling middleware
-app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+app.use((err: Error & { type?: string }, _req: Request, res: Response, _next: NextFunction) => {
+  // Bad uploads and malformed bodies are the client's fault, not a server error.
+  if (err instanceof multer.MulterError || err.message?.startsWith('Invalid file type')) {
+    res.status(400).json({ error: err.message });
+    return;
+  }
+  if (err.type === 'entity.parse.failed' || err.type === 'entity.too.large') {
+    res.status(400).json({ error: 'Invalid request body' });
+    return;
+  }
   console.error('Error:', err);
   res.status(500).json({
     error: 'Internal server error',

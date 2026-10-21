@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { body } from 'express-validator';
 import { authenticate } from '../middleware/auth.middleware';
+import { rateLimit, contactKey } from '../middleware/rateLimit.middleware';
 import {
   requestOTP,
   verifyOTP,
-  login,
   logout,
   getCurrentUser,
   refreshToken,
@@ -13,29 +13,49 @@ import {
 
 const router = Router();
 
+const MINUTE = 60 * 1000;
+
+// Email or phone, as plain strings (objects would turn into Mongo query operators).
+const contactValidators = [
+  body('email')
+    .optional()
+    .isString()
+    .trim()
+    .toLowerCase()
+    .isEmail()
+    .withMessage('Invalid email'),
+  body('phone')
+    .optional()
+    .isString()
+    .trim()
+    .isMobilePhone('any')
+    .withMessage('Invalid phone'),
+];
+
 // Request OTP (Continue with Email/Phone)
 router.post(
   '/request-otp',
-  [
-    body('email').optional().isEmail().withMessage('Invalid email'),
-    body('phone').optional().isMobilePhone('any').withMessage('Invalid phone'),
-  ],
+  rateLimit({ windowMs: 15 * MINUTE, max: 10 }),
+  rateLimit({ windowMs: 60 * MINUTE, max: 5, key: contactKey }),
+  contactValidators,
   requestOTP
 );
 
 // Verify OTP
 router.post(
   '/verify-otp',
+  rateLimit({ windowMs: 15 * MINUTE, max: 30 }),
+  rateLimit({ windowMs: 15 * MINUTE, max: 10, key: contactKey }),
   [
-    body('email').optional().isEmail(),
-    body('phone').optional(),
-    body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits'),
+    ...contactValidators,
+    body('otp')
+      .isString()
+      .isLength({ min: 6, max: 6 })
+      .isNumeric()
+      .withMessage('OTP must be 6 digits'),
   ],
   verifyOTP
 );
-
-// // Login (after OTP verification)
-router.post('/login', [body('email').optional().isEmail(), body('phone').optional()], login);
 
 // Logout
 router.post('/logout', authenticate, logout);
@@ -44,7 +64,12 @@ router.post('/logout', authenticate, logout);
 router.get('/me', authenticate, getCurrentUser);
 
 // Refresh token
-router.post('/refresh', refreshToken);
+router.post(
+  '/refresh',
+  rateLimit({ windowMs: 15 * MINUTE, max: 60 }),
+  [body('refreshToken').isString().withMessage('Refresh token is required')],
+  refreshToken
+);
 
 router.delete('/account', authenticate, deleteAccount);
 

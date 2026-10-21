@@ -34,7 +34,8 @@ const plusSchema = new Schema<IPlus>(
     paystackCustomerCode: { type: String, index: true, sparse: true },
     paystackSubscriptionCode: String,
     paystackEmailToken: String,
-    playPurchaseToken: { type: String, index: true, sparse: true },
+    // Unique so one Play subscription can never give Plus to two accounts.
+    playPurchaseToken: { type: String, unique: true, sparse: true },
   },
   { timestamps: true }
 );
@@ -52,6 +53,8 @@ export interface IPlusPayment extends Document {
   source: PlusSource;
   amount: number;
   currency: string;
+  // Set once when Paystack refunds the charge, so the refund is taken back once.
+  refundedAt?: Date;
   createdAt: Date;
 }
 
@@ -63,6 +66,7 @@ const plusPaymentSchema = new Schema<IPlusPayment>(
     source: { type: String, enum: ['paystack', 'paystack_pass', 'play'], required: true },
     amount: { type: Number, required: true },
     currency: { type: String, required: true },
+    refundedAt: Date,
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

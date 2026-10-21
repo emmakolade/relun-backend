@@ -11,8 +11,8 @@ import { ProfileView } from '../models/ProfileView';
 import { getBlockedUserIds, isBlockedEitherWay } from '../models/Block';
 import { toCard } from '../services/card.service';
 import { canSeeInsights, hasPlus, likeAllowance } from '../services/plus.service';
-import { uploadImage, uploadMultipleImages } from '../services/cloudinary.service';
-import { calculateDistance } from '../utils/helpers';
+import { deleteImage, uploadImage, uploadMultipleImages } from '../services/cloudinary.service';
+import { calculateAge, calculateDistance, displayDistanceKm } from '../utils/helpers';
 import { notifyLiked, notifyNewMatch, notifyViewed } from '../services/push.service';
 import { acceptMessageRequest, messageRequestView } from '../services/messageRequest.service';
 import {
@@ -25,6 +25,26 @@ import {
 // Location update throttle settings
 const LOCATION_UPDATE_DISTANCE_THRESHOLD = 0.5; // 500 meters in km
 const LOCATION_UPDATE_TIME_THRESHOLD = 5 * 60 * 1000; // 5 minutes in ms
+
+// Free-text profile fields a user may edit, with their max length.
+const PROFILE_TEXT_FIELDS: Record<string, number> = {
+  bio: 500,
+  occupation: 100,
+  education: 100,
+  company: 100,
+  school: 100,
+  city: 100,
+  state: 100,
+  country: 100,
+  bodyType: 50,
+  ethnicity: 50,
+  drinking: 50,
+  smoking: 50,
+  religion: 50,
+  politicalViews: 50,
+};
+
+const MIN_AGE = 18;
 
 const isLocationIndexError = (error: unknown): boolean => {
   if (!error || typeof error !== 'object') {
@@ -79,6 +99,23 @@ export const completeProfile = async (req: AuthRequest, res: Response): Promise<
       longitude,
     }: CompleteProfileRequest = req.body;
 
+    if (typeof fullName !== 'string' || !fullName.trim() || fullName.length > 100) {
+      res.status(400).json({ error: 'Full name is required' });
+      return;
+    }
+
+    // Adults only. Also rejects future and absurd birth dates.
+    const age = calculateAge(new Date(dateOfBirth as string));
+    if (!Number.isFinite(age) || age < MIN_AGE || age > 120) {
+      res.status(400).json({ error: `You must be at least ${MIN_AGE} to use Relun` });
+      return;
+    }
+
+    if (bio !== undefined && typeof bio !== 'string') {
+      res.status(400).json({ error: 'Invalid bio' });
+      return;
+    }
+
     const user = await User.findById(req.user!.id);
 
     if (!user) {
@@ -86,7 +123,7 @@ export const completeProfile = async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    if (fullName) user.fullName = fullName;
+    if (fullName) user.fullName = fullName.trim();
     if (dateOfBirth) user.dateOfBirth = new Date(dateOfBirth);
     if (gender) user.gender = gender;
 
@@ -111,24 +148,18 @@ export const completeProfile = async (req: AuthRequest, res: Response): Promise<
 
     await user.save();
 
-    const profileUpdateData: ProfileUpdateData = {
-      fullName,
-      dateOfBirth,
-      gender,
-      bio,
-      segment,
-      email,
-      phone,
-      latitude,
-      longitude,
-    };
+    // Only Profile fields; the User ones were saved above.
+    const profileUpdateData: ProfileUpdateData = { segment };
+    if (bio !== undefined) profileUpdateData.bio = bio;
 
     if (latitude !== undefined && longitude !== undefined) {
-      profileUpdateData.latitude = latitude;
-      profileUpdateData.longitude = longitude;
+      const lat = Number(latitude);
+      const lng = Number(longitude);
+      profileUpdateData.latitude = lat;
+      profileUpdateData.longitude = lng;
       profileUpdateData.location = {
         type: 'Point',
-        coordinates: [longitude, latitude],
+        coordinates: [lng, lat],
       };
     }
 
@@ -228,18 +259,57 @@ export const updateProfile = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    const updateData: ProfileUpdateData = { ...req.body };
+    // Only the fields a person may edit on their own profile. Spreading req.body
+    // would let a client set userId, isComplete, segment (permanent) and so on.
+    const updateData: ProfileUpdateData = {};
+    const body = req.body ?? {};
 
-    if (typeof req.body.fullName === 'string') {
-      const trimmedFullName = req.body.fullName.trim();
+    Object.entries(PROFILE_TEXT_FIELDS).forEach(([field, maxLength]) => {
+      if (typeof body[field] === 'string') {
+        (updateData as Record<string, unknown>)[field] = body[field].trim().slice(0, maxLength);
+      }
+    });
+
+    if (Array.isArray(body.interests)) {
+      updateData.interests = body.interests
+        .filter((interest: unknown): interest is string => typeof interest === 'string')
+        .map((interest: string) => interest.trim().slice(0, 50))
+        .filter(Boolean)
+        .slice(0, 20);
+    }
+
+    const height = Number(body.height);
+    if (body.height !== undefined && body.height !== null && Number.isFinite(height) && height >= 50 && height <= 300) {
+      updateData.height = height;
+    }
+
+    (['isVisible', 'showAge', 'showDistance'] as const).forEach((field) => {
+      if (typeof body[field] === 'boolean') updateData[field] = body[field];
+    });
+
+    const latitude = Number(body.latitude);
+    const longitude = Number(body.longitude);
+    if (
+      body.latitude !== undefined &&
+      body.longitude !== undefined &&
+      body.latitude !== null &&
+      body.longitude !== null &&
+      Number.isFinite(latitude) &&
+      Number.isFinite(longitude) &&
+      Math.abs(latitude) <= 90 &&
+      Math.abs(longitude) <= 180
+    ) {
+      updateData.latitude = latitude;
+      updateData.longitude = longitude;
+    }
+
+    if (typeof body.fullName === 'string') {
+      const trimmedFullName = body.fullName.trim().slice(0, 100);
 
       if (trimmedFullName.length > 0) {
         await User.findByIdAndUpdate(req.user!.id, { fullName: trimmedFullName });
       }
     }
-
-    // fullName belongs to User model, not Profile model
-    delete updateData.fullName;
 
     // Handle location conversion from latitude/longitude to GeoJSON
     if (updateData.latitude !== undefined && updateData.longitude !== undefined) {
@@ -370,6 +440,11 @@ export const replacePhoto = async (req: AuthRequest, res: Response): Promise<voi
     const { photoId } = req.params;
     const file = req.file;
 
+    if (!Types.ObjectId.isValid(photoId)) {
+      res.status(404).json({ error: 'Photo not found' });
+      return;
+    }
+
     if (!file) {
       res.status(400).json({ error: 'No file uploaded' });
       return;
@@ -384,13 +459,16 @@ export const replacePhoto = async (req: AuthRequest, res: Response): Promise<voi
 
     const uploadResult = await uploadImage(file.buffer, `relun/users/${req.user!.id}`);
 
-    // if (existingPhoto.publicId) {
-    //   await deleteImage(existingPhoto.publicId);
-    // }
+    // The old image must not stay publicly reachable once replaced.
+    const oldPublicId = existingPhoto.publicId;
 
     existingPhoto.url = uploadResult.secureUrl;
     existingPhoto.publicId = uploadResult.publicId;
     await existingPhoto.save();
+
+    if (oldPublicId) {
+      deleteImage(oldPublicId).catch((error) => console.error('Delete old photo error:', error));
+    }
 
     res.json(existingPhoto);
   } catch (error) {
@@ -403,6 +481,11 @@ export const deletePhoto = async (req: AuthRequest, res: Response): Promise<void
   try {
     const { photoId } = req.params;
 
+    if (!Types.ObjectId.isValid(photoId)) {
+      res.status(404).json({ error: 'Photo not found' });
+      return;
+    }
+
     const photo = await Photo.findOne({ _id: photoId, userId: req.user!.id });
 
     if (!photo) {
@@ -410,13 +493,13 @@ export const deletePhoto = async (req: AuthRequest, res: Response): Promise<void
       return;
     }
 
-    // Delete from Cloudinary if publicId exists
-    // if (photo.publicId) {
-    //   await deleteImage(photo.publicId);
-    // }
-
     // Delete from database
-    await Photo.deleteOne({ _id: photoId });
+    await Photo.deleteOne({ _id: photoId, userId: req.user!.id });
+
+    // Delete from Cloudinary too, so a removed photo stops being publicly reachable.
+    if (photo.publicId) {
+      deleteImage(photo.publicId).catch((error) => console.error('Delete photo image error:', error));
+    }
 
     // Reorder remaining photos
     const remainingPhotos = await Photo.find({ userId: req.user!.id }).sort({ order: 1 });
@@ -493,13 +576,12 @@ export const getUserProfile = async (req: AuthRequest, res: Response): Promise<v
       viewerProfile?.latitude &&
       viewerProfile?.longitude
     ) {
-      const km = calculateDistance(
+      plainProfile.distance = displayDistanceKm(
         viewerProfile.latitude,
         viewerProfile.longitude,
         plainProfile.latitude,
         plainProfile.longitude
       );
-      plainProfile.distance = km < 10 ? Math.round(km * 10) / 10 : Math.round(km);
     }
 
     res.json({
@@ -655,7 +737,7 @@ export const getReceivedLikes = async (req: AuthRequest, res: Response): Promise
   try {
     const userId = req.user!.id;
     const { limit = 100 } = req.query;
-    const safeLimit = Math.max(1, Math.min(Number(limit), 200));
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 200));
 
     // People already liked back are matches and live in Messages instead.
     const [insights, blockedIds, liked] = await Promise.all([
@@ -775,7 +857,7 @@ export const getNearbyUsers = async (req: AuthRequest, res: Response): Promise<v
 
     const { limit = 20, latitude, longitude } = req.query;
     const userId = req.user!.id;
-    const safeLimit = Math.max(1, Math.min(Number(limit), 50));
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 50));
 
     let currentProfile = await Profile.findOne({ userId });
     const currentSegment = currentProfile?.segment || 'relationship';
@@ -899,9 +981,11 @@ export const getNearbyUsers = async (req: AuthRequest, res: Response): Promise<v
       .map((row) => {
         const { user, ...profile } = row;
         if (typeof profile.distance === 'number') {
-          // One decimal under 10 km so "0.4 km" and "< 1 km away" stay possible.
-          const km = profile.distance / 1000;
-          profile.distance = km < 10 ? Math.round(km * 10) / 10 : Math.round(km);
+          // Coarse on purpose: exact distances let a spoofed viewer triangulate people.
+          profile.distance =
+            coordinates && typeof profile.latitude === 'number' && typeof profile.longitude === 'number'
+              ? displayDistanceKm(coordinates[1], coordinates[0], profile.latitude, profile.longitude)
+              : Math.max(1, Math.round(profile.distance / 1000));
         }
         return toCard({
           user,
