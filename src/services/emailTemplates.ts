@@ -102,6 +102,43 @@ ${content}
   return { html, attachments: [{ filename: 'relun-logo.png', path: LOGO_PATH, cid: LOGO_CID }] };
 };
 
+/** Confirms a sign-up to hear when the Android and iPhone apps launch. */
+export const waitlistEmail = (params: { recipient: string; platform?: 'android' | 'ios' }) => {
+  const which = params.platform === 'android' ? 'the Android app' : params.platform === 'ios' ? 'the iPhone app' : 'the Relun app';
+  const content = `
+                  <h1 style="margin:0 0 12px;font-size:24px;line-height:32px;font-weight:700;color:${C.ink};">You're on the list</h1>
+                  <p style="margin:0 0 20px;font-size:16px;line-height:24px;color:${C.body};">
+                    Thanks for your interest in Relun. We'll email you once when ${which} is ready to download.
+                  </p>
+                  <p style="margin:0 0 28px;font-size:16px;line-height:24px;color:${C.body};">
+                    You don't have to wait: Relun already works in your phone's browser, and you can add it to your home screen.
+                  </p>
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="border-radius:999px;background:${C.rose};">
+                        <a href="https://relun.chat/app/" style="display:inline-block;padding:14px 28px;font-size:16px;font-weight:700;color:#FFFFFF;text-decoration:none;border-radius:999px;">Open Relun on the web</a>
+                      </td>
+                    </tr>
+                  </table>
+                  <p style="margin:28px 0 0;font-size:14px;line-height:22px;color:${C.muted};">
+                    Didn't sign up? You can ignore this email, or reply and we'll remove you.
+                  </p>`;
+
+  return {
+    subject: "You're on the Relun waitlist",
+    text:
+      `Thanks for your interest in Relun. We'll email you once when ${which} is ready to download.\n\n` +
+      `You don't have to wait: open https://relun.chat/app/ in your phone's browser.\n\n` +
+      `Didn't sign up? Ignore this email, or reply and we'll remove you.`,
+    ...renderEmail({
+      preheader: `We'll email you when ${which} is ready.`,
+      title: "You're on the Relun waitlist",
+      content,
+      recipient: params.recipient,
+    }),
+  };
+};
+
 /** The sign-in code email. */
 export const otpEmail = (params: { code: string; minutes: number; recipient: string }) => {
   const code = escapeHtml(params.code);

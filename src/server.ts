@@ -22,6 +22,10 @@ import datesRoutes from './routes/dates.routes';
 import safetyRoutes from './routes/safety.routes';
 import settingsRoutes from './routes/settings.routes';
 import plusRoutes from './routes/plus.routes';
+import waitlistRoutes from './routes/waitlist.routes';
+
+// Import scheduled jobs
+import { schedulePurgeDeletedAccounts } from './jobs/purgeDeletedAccounts';
 
 // Import socket handler
 import { initializeSocketIO } from './socket/chat.socket';
@@ -83,6 +87,7 @@ app.use('/api/dates', datesRoutes);
 app.use('/api/safety', safetyRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/plus', plusRoutes);
+app.use('/api/waitlist', waitlistRoutes);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {
@@ -105,6 +110,7 @@ const startServer = async () => {
   try {
     // Connect to MongoDB
     await connectDB();
+    schedulePurgeDeletedAccounts();
 
     httpServer.listen(PORT, () => {
       console.log(`

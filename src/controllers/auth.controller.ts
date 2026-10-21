@@ -382,8 +382,9 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
  * DELETE /api/auth/account
  *
  * Deactivates the account and frees the email and phone so they can sign up
- * again. Photos are removed from Cloudinary; messages stay so the other side's
- * history does not silently change, but the profile disappears everywhere.
+ * again. Photos are removed from Cloudinary and the profile disappears
+ * everywhere. Everything else, messages on both sides included, is erased 30
+ * days later by jobs/purgeDeletedAccounts.
  */
 export const deleteAccount = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
