@@ -41,7 +41,7 @@ const corsOrigins = (process.env.CORS_ORIGIN || '')
   .map((origin) => origin.trim())
   .filter(Boolean);
 if (isProduction && (corsOrigins.length === 0 || corsOrigins.includes('*'))) {
-  console.error('CORS_ORIGIN must list the web app origins in production, e.g. https://relun.app');
+  console.error('TRUST_PROXY must list the web app origins in production, e.g. https://relun.chat');
   process.exit(1);
 }
 const corsOrigin = corsOrigins.length > 0 ? corsOrigins : '*';
