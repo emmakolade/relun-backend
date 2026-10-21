@@ -1,8 +1,11 @@
-// Load environment variables FIRST before any other imports
+// Load environment variables and error monitoring FIRST, before any other imports
+import './instrument';
 import dotenv from 'dotenv';
 dotenv.config();
+import * as Sentry from '@sentry/node';
 
 import express, { Application, Request, Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -25,6 +28,7 @@ import safetyRoutes from './routes/safety.routes';
 import settingsRoutes from './routes/settings.routes';
 import plusRoutes from './routes/plus.routes';
 import waitlistRoutes from './routes/waitlist.routes';
+import adminRoutes from './routes/admin.routes';
 
 // Import scheduled jobs
 import { schedulePurgeDeletedAccounts } from './jobs/purgeDeletedAccounts';
@@ -100,10 +104,12 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
   next();
 });
 
-// Health check
+// Health check, polled by the uptime monitor: 503 when the database is unreachable.
 app.get('/health', (_req: Request, res: Response) => {
-  res.json({
-    status: 'ok',
+  const dbUp = mongoose.connection.readyState === 1;
+  res.status(dbUp ? 200 : 503).json({
+    status: dbUp ? 'ok' : 'degraded',
+    database: dbUp ? 'up' : 'down',
     timestamp: new Date().toISOString(),
     service: 'Relun API',
   });
@@ -120,6 +126,10 @@ app.use('/api/safety', safetyRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/plus', plusRoutes);
 app.use('/api/waitlist', waitlistRoutes);
+app.use('/api/admin', adminRoutes);
+
+// Reports unhandled route errors to Sentry (a no-op when SENTRY_DSN is unset).
+Sentry.setupExpressErrorHandler(app);
 
 // 404 handler
 app.use((_req: Request, res: Response) => {

@@ -45,4 +45,8 @@ const userSchema = new Schema<IUser>(
   { timestamps: true }
 );
 
+// Admin stats: sign-ups per day and active-user counts.
+userSchema.index({ createdAt: -1 });
+userSchema.index({ lastActive: -1 });
+
 export const User = mongoose.model<IUser>('User', userSchema);

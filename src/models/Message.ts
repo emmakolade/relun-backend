@@ -35,6 +35,8 @@ messageSchema.index({ conversationId: 1, createdAt: -1 });
 messageSchema.index({ receiverId: 1, isRead: 1 });
 // The $or in getConversations needs both branches indexed to avoid a collection scan.
 messageSchema.index({ senderId: 1, createdAt: -1 });
+// Admin stats: messages per day.
+messageSchema.index({ createdAt: -1 });
 
 // Helper function to generate a deterministic conversation ID from two user IDs
 export const getConversationId = (userId1: string, userId2: string): string => {

@@ -26,6 +26,8 @@ const likeSchema = new Schema<ILike>(
 likeSchema.index({ userId: 1, targetUserId: 1 }, { unique: true });
 // Counting today's likes for the daily limit.
 likeSchema.index({ userId: 1, createdAt: -1 });
+// Admin stats: likes and matches per day.
+likeSchema.index({ createdAt: -1 });
 
 export const Like = mongoose.model<ILike>('Like', likeSchema);
 

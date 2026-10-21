@@ -30,3 +30,6 @@ export const removeConnection = (userId: string): boolean => {
 };
 
 export const isUserOnline = (userId: string): boolean => connectionCounts.has(userId);
+
+/** Number of users with at least one open socket. */
+export const onlineCount = (): number => connectionCounts.size;

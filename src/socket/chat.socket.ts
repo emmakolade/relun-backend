@@ -20,6 +20,7 @@ import {
   SocketPresenceEvent,
 } from '../types';
 import { addConnection, removeConnection, isUserOnline } from './presence';
+import { touchActivity } from '../services/activity.service';
 import { notifyNewMessage } from '../services/push.service';
 
 interface AuthenticatedSocket extends Socket {
@@ -120,7 +121,7 @@ export const initializeSocketIO = (io: Server) => {
     const allowJoin = createRateLimiter(30, 10_000);
 
     // Update user's online status
-    User.findByIdAndUpdate(userId, { lastActive: new Date() }).catch(console.error);
+    touchActivity(userId);
 
     // Join user's room
     socket.join(`user:${userId}`);

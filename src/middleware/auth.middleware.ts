@@ -1,7 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import * as Sentry from '@sentry/node';
 import { User } from '../models/User';
 import { verifyToken } from '../utils/jwt.utils';
+import { touchActivity } from '../services/activity.service';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -27,16 +29,16 @@ export const authenticate = async (
     const token = authHeader.substring(7);
     const decoded = verifyToken(token) as { userId: string };
 
-    const user = await User.findById(decoded.userId).select('email phone isActive');
+    const user = await User.findById(decoded.userId).select('email phone isActive lastActive');
 
     if (!user) {
-      console.error('[AUTH] User not found:', decoded.userId);
+      console.warn('[AUTH] User not found:', decoded.userId);
       res.status(401).json({ error: 'User not found' });
       return;
     }
 
     if (!user.isActive) {
-      console.error('[AUTH] User is inactive:', decoded.userId);
+      console.warn('[AUTH] User is inactive:', decoded.userId);
       res.status(401).json({ error: 'Account is inactive' });
       return;
     }
@@ -46,6 +48,9 @@ export const authenticate = async (
       email: user.email || undefined,
       phone: user.phone || undefined,
     };
+    touchActivity(req.user.id, user.lastActive);
+    // Id only: errors are traceable to an account without sending contact details.
+    Sentry.setUser({ id: req.user.id });
 
     next();
   } catch (error) {
