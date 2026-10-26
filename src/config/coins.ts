@@ -19,8 +19,8 @@ export const COIN_COSTS = {
   messageRequest: num('MESSAGE_REQUEST_COINS', 200),
   // Likes & Views passes for people who'd rather not subscribe. Priced a little
   // above the matching Plus plan, which includes them and more.
-  insights7: num('INSIGHTS_7D_COINS', 700),
-  insights30: num('INSIGHTS_30D_COINS', 1500),
+  insights7: num('INSIGHTS_7D_COINS', 500),
+  insights30: num('INSIGHTS_30D_COINS', 1000),
   // A date post beyond the free active ones.
   datePost: num('DATE_POST_COINS', 100),
 } as const;

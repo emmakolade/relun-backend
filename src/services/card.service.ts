@@ -40,6 +40,7 @@ export const toCard = (entry: { user: unknown; profile: unknown; photos?: unknow
     delete profile.maxDistanceKm;
     delete profile.ageMin;
     delete profile.ageMax;
+    delete profile.showMe;
     if (!showDistance) delete profile.distance;
   }
 

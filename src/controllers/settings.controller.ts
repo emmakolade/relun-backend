@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { validationResult } from 'express-validator';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { Profile } from '../models/Profile';
+import { User } from '../models/User';
 
 const SETTINGS_FIELDS = [
   'isVisible',
@@ -12,9 +13,10 @@ const SETTINGS_FIELDS = [
   'maxDistanceKm',
   'ageMin',
   'ageMax',
+  'showMe',
 ] as const;
 
-const pickSettings = (profile: Record<string, any> | null) => ({
+const pickSettings = (profile: Record<string, any> | null, gender?: string) => ({
   isVisible: profile?.isVisible ?? true,
   showAge: profile?.showAge ?? true,
   showDistance: profile?.showDistance ?? true,
@@ -24,13 +26,22 @@ const pickSettings = (profile: Record<string, any> | null) => ({
   ageMin: profile?.ageMin ?? 18,
   ageMax: profile?.ageMax ?? 99,
   segment: profile?.segment ?? 'relationship',
+  showMe: profile?.showMe ?? 'opposite',
+  // Read-only here; the apps need it to label "Show me" as Men or Women.
+  gender: gender ?? null,
 });
+
+const userGender = async (userId: string) =>
+  (await User.findById(userId).select('gender').lean())?.gender;
 
 // GET /api/settings
 export const getSettings = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const profile = await Profile.findOne({ userId: req.user!.id }).lean();
-    res.json({ settings: pickSettings(profile) });
+    const [profile, gender] = await Promise.all([
+      Profile.findOne({ userId: req.user!.id }).lean(),
+      userGender(req.user!.id),
+    ]);
+    res.json({ settings: pickSettings(profile, gender) });
   } catch (error) {
     console.error('Get settings error:', error);
     res.status(500).json({ error: 'Failed to load settings' });
@@ -66,7 +77,7 @@ export const updateSettings = async (req: AuthRequest, res: Response): Promise<v
       { new: true, upsert: true }
     ).lean();
 
-    res.json({ settings: pickSettings(profile) });
+    res.json({ settings: pickSettings(profile, await userGender(req.user!.id)) });
   } catch (error) {
     console.error('Update settings error:', error);
     res.status(500).json({ error: 'Failed to update settings' });

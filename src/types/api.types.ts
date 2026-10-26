@@ -92,6 +92,7 @@ export interface CompleteProfileRequest {
   gender?: 'male' | 'female';
   bio?: string;
   segment?: string;
+  showMe?: 'opposite' | 'everyone';
   email?: string;
   phone?: string;
   latitude?: number;
@@ -106,6 +107,7 @@ export interface ProfileUpdateData {
   phone?: string;
   bio?: string;
   segment?: string;
+  showMe?: 'opposite' | 'everyone';
   latitude?: number;
   longitude?: number;
   location?: {

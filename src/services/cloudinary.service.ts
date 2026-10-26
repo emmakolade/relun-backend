@@ -44,6 +44,8 @@ export const uploadImage = async (
         {
           folder,
           resource_type: 'image',
+          // Store every upload as JPEG so HEIC, AVIF, TIFF and the like display everywhere.
+          format: 'jpg',
           transformation: [
             { width: 1080, height: 1080, crop: 'limit' }, // Max size
             { quality: 'auto:good' }, // Auto quality optimization

@@ -19,6 +19,7 @@ import {
   passUser,
   getProfileViews,
 } from '../controllers/profile.controller';
+import { SHOW_ME_VALUES } from '../models/Profile';
 
 const router = Router();
 
@@ -118,8 +119,9 @@ router.post(
   [
     body('fullName').notEmpty().withMessage('Full name is required'),
     body('dateOfBirth').isISO8601().withMessage('Valid date of birth is required'),
-    body('gender').isIn(['male', 'female', 'non_binary', 'other']).withMessage('Invalid gender'),
+    body('gender').isIn(['male', 'female']).withMessage('Invalid gender'),
     body('segment').isIn(['relationship', 'fun']).withMessage('Invalid segment'),
+    body('showMe').optional().isIn([...SHOW_ME_VALUES]).withMessage('Invalid showMe'),
     body('bio').optional().isString().isLength({ max: 500 }),
     body('email').optional().isEmail(),
     body('phone').optional().isMobilePhone('any'),

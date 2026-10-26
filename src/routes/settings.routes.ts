@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { body } from 'express-validator';
 import { authenticate } from '../middleware/auth.middleware';
 import { getSettings, updateSettings } from '../controllers/settings.controller';
+import { SHOW_ME_VALUES } from '../models/Profile';
 
 const router = Router();
 
@@ -19,6 +20,7 @@ router.patch(
     body('maxDistanceKm').optional().isInt({ min: 1, max: 100 }).toInt(),
     body('ageMin').optional().isInt({ min: 18, max: 99 }).toInt(),
     body('ageMax').optional().isInt({ min: 18, max: 99 }).toInt(),
+    body('showMe').optional().isIn([...SHOW_ME_VALUES]),
   ],
   updateSettings
 );

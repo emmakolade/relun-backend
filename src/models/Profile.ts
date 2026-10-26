@@ -1,5 +1,9 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
 
+// Who Discover shows: only the other gender, or everyone.
+export const SHOW_ME_VALUES = ['opposite', 'everyone'] as const;
+export type ShowMe = (typeof SHOW_ME_VALUES)[number];
+
 export interface IProfile extends Document {
   userId: Types.ObjectId;
   bio?: string;
@@ -35,6 +39,7 @@ export interface IProfile extends Document {
   maxDistanceKm: number;
   ageMin: number;
   ageMax: number;
+  showMe: ShowMe;
   isComplete: boolean;
   completenessScore: number;
 }
@@ -104,6 +109,8 @@ const profileSchema = new Schema<IProfile>(
     maxDistanceKm: { type: Number, default: 35, min: 1, max: 100 },
     ageMin: { type: Number, default: 18, min: 18, max: 99 },
     ageMax: { type: Number, default: 99, min: 18, max: 99 },
+    // Profiles saved before this field existed have none; discovery treats that as 'opposite'.
+    showMe: { type: String, enum: SHOW_ME_VALUES, default: 'opposite' },
     isComplete: { type: Boolean, default: false },
     completenessScore: { type: Number, default: 0 },
   },

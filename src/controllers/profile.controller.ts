@@ -93,6 +93,7 @@ export const completeProfile = async (req: AuthRequest, res: Response): Promise<
       gender,
       bio,
       segment,
+      showMe,
       email,
       phone,
       latitude,
@@ -151,6 +152,7 @@ export const completeProfile = async (req: AuthRequest, res: Response): Promise<
     // Only Profile fields; the User ones were saved above.
     const profileUpdateData: ProfileUpdateData = { segment };
     if (bio !== undefined) profileUpdateData.bio = bio;
+    if (showMe) profileUpdateData.showMe = showMe;
 
     if (latitude !== undefined && longitude !== undefined) {
       const lat = Number(latitude);
@@ -845,8 +847,8 @@ export const getMatches = async (req: AuthRequest, res: Response): Promise<void>
 // Get nearby users for discovery/feed.
 //
 // Shows people in the same segment who are visible, active, inside the
-// viewer's distance and age filters, and not already liked, passed, matched or
-// blocked in either direction.
+// viewer's distance, age and "show me" filters, and not already liked, passed,
+// matched or blocked in either direction.
 export const getNearbyUsers = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const errors = validationResult(req);
@@ -903,11 +905,24 @@ export const getNearbyUsers = async (req: AuthRequest, res: Response): Promise<v
       }
     }
 
-    const [liked, passed, blockedIds] = await Promise.all([
+    const [liked, passed, blockedIds, viewer] = await Promise.all([
       Like.find({ userId }).select('targetUserId').lean(),
       Pass.find({ userId }).select('targetUserId').lean(),
       getBlockedUserIds(userId),
+      User.findById(userId).select('gender').lean(),
     ]);
+
+    // "Show me" works both ways: the viewer only sees genders they asked for,
+    // and only people who asked to see the viewer's gender. A missing showMe
+    // (older profiles) counts as 'opposite'.
+    const viewerGender = viewer?.gender;
+    const genderFilter =
+      viewerGender && currentProfile?.showMe !== 'everyone'
+        ? { gender: viewerGender === 'female' ? 'male' : 'female' }
+        : {};
+    const wantsViewer: PipelineStage[] = viewerGender
+      ? [{ $match: { $or: [{ showMe: 'everyone' }, { 'user.gender': { $ne: viewerGender } }] } }]
+      : [];
 
     const excluded = [
       userId,
@@ -959,6 +974,7 @@ export const getNearbyUsers = async (req: AuthRequest, res: Response): Promise<v
             {
               $match: {
                 isActive: true,
+                ...genderFilter,
                 $or: [
                   { dateOfBirth: { $gte: oldestDob, $lte: youngestDob } },
                   { dateOfBirth: { $exists: false } },
@@ -970,6 +986,7 @@ export const getNearbyUsers = async (req: AuthRequest, res: Response): Promise<v
         },
       },
       { $unwind: '$user' },
+      ...wantsViewer,
       { $limit: safeLimit },
     ]);
 

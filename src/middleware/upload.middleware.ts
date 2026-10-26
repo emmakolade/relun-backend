@@ -3,14 +3,17 @@ import multer from 'multer';
 // Configure multer to use memory storage
 const storage = multer.memoryStorage();
 
-// File filter to accept only images
-const fileFilter = (_req: any, file: Express.Multer.File, cb: any) => {
-  const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic'];
+// The apps send a JPEG when they can decode the photo, and the original file
+// when they can't (HEIC, AVIF, RAW...). Cloudinary reads all of these and
+// stores them as JPEG, so accept any image. Some browsers send HEIC with no
+// type, so fall back to the file extension.
+const IMAGE_EXTENSIONS = /\.(jpe?g|png|webp|gif|bmp|tiff?|heic|heif|avif|jxl|dng|ico)$/i;
 
-  if (allowedMimeTypes.includes(file.mimetype)) {
+const fileFilter = (_req: any, file: Express.Multer.File, cb: any) => {
+  if (file.mimetype.startsWith('image/') || IMAGE_EXTENSIONS.test(file.originalname)) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid file type. Only JPEG, PNG, WebP, and HEIC images are allowed.'), false);
+    cb(new Error('That file isn’t a photo. Choose an image instead.'), false);
   }
 };
 
@@ -19,6 +22,6 @@ export const upload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB max file size
+    fileSize: 20 * 1024 * 1024, // 20MB; originals from modern phones can be large
   },
 });

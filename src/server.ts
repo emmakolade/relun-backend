@@ -139,7 +139,12 @@ app.use((_req: Request, res: Response) => {
 // Error handling middleware
 app.use((err: Error & { type?: string }, _req: Request, res: Response, _next: NextFunction) => {
   // Bad uploads and malformed bodies are the client's fault, not a server error.
-  if (err instanceof multer.MulterError || err.message?.startsWith('Invalid file type')) {
+  if (err instanceof multer.MulterError) {
+    const message = err.code === 'LIMIT_FILE_SIZE' ? 'That photo is too large. Try one under 20 MB.' : err.message;
+    res.status(400).json({ error: message });
+    return;
+  }
+  if (err.message?.startsWith('That file isn’t a photo')) {
     res.status(400).json({ error: err.message });
     return;
   }
