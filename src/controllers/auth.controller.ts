@@ -21,6 +21,7 @@ import { CoinTransaction } from '../models/CoinTransaction';
 import { DatePost } from '../models/DatePost';
 import { deleteImage } from '../services/cloudinary.service';
 import { SIGNUP_BONUS_COINS, SIGNUP_BONUS_REF } from '../config/coins';
+import { isPlusAddress, PLUS_ADDRESS_ERROR } from '../utils/email.utils';
 import {
   RequestOTPRequest,
   RequestOTPResponse,
@@ -82,6 +83,10 @@ export const requestOTP = async (req: Request, res: Response): Promise<void> => 
       user.otpAttempts = 0;
       await user.save();
     } else {
+      if (email && isPlusAddress(email)) {
+        res.status(400).json({ error: PLUS_ADDRESS_ERROR });
+        return;
+      }
       user = await User.create({
         email,
         phone,

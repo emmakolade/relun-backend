@@ -13,6 +13,7 @@ import { toCard } from '../services/card.service';
 import { canSeeInsights, hasPlus, likeAllowance } from '../services/plus.service';
 import { deleteImage, uploadImage, uploadMultipleImages } from '../services/cloudinary.service';
 import { calculateAge, calculateDistance, displayDistanceKm } from '../utils/helpers';
+import { isPlusAddress, PLUS_ADDRESS_ERROR } from '../utils/email.utils';
 import { notifyLiked, notifyNewMatch, notifyViewed } from '../services/push.service';
 import { acceptMessageRequest, messageRequestView } from '../services/messageRequest.service';
 import {
@@ -130,6 +131,10 @@ export const completeProfile = async (req: AuthRequest, res: Response): Promise<
 
     // If user signed up with phone, they must provide email (and vice versa)
     if (email && !user.email) {
+      if (isPlusAddress(email)) {
+        res.status(400).json({ error: PLUS_ADDRESS_ERROR });
+        return;
+      }
       const existingEmail = await User.findOne({ email });
       if (existingEmail) {
         res.status(400).json({ error: 'Email already in use' });
