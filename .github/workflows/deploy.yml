@@ -23,18 +23,55 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Pull, build and restart
+      # Build with the same Node major the server runs, so the shipped node_modules
+      # (including native addons like bcrypt) match the runtime.
+      - name: Read server Node version
+        id: server-node
+        run: |
+          version=$(ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_HOST }} 'node -v')
+          echo "Server runs Node $version"
+          echo "version=${version#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.server-node.outputs.version }}
+          cache: npm
+
+      # Install and build here instead of on the server: the instance doesn't have
+      # enough memory for `npm ci` + `tsc` alongside the running API (OOM, exit 137).
+      - name: Install, build and bundle
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          npm prune --omit=dev --no-audit --no-fund
+          tar -czf release.tgz dist node_modules
+
+      - name: Upload release
+        run: scp -i ~/.ssh/deploy_key release.tgz ubuntu@${{ secrets.EC2_HOST }}:/tmp/relun-release.tgz
+
+      - name: Swap in release and restart
         run: |
           ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_HOST }} 'bash -se' <<'EOF'
           set -euo pipefail
           cd ~/relun-backend
           # The server is a deploy target, not a workspace: make tracked files match main exactly,
-          # discarding any edits made on the box (e.g. an `npm install` rewriting package-lock.json).
-          # Untracked and ignored files such as .env and secrets/ are left alone.
+          # discarding any edits made on the box. Untracked and ignored files such as .env,
+          # secrets/, dist/ and node_modules/ are left alone here and replaced below.
           git fetch origin main
           git reset --hard origin/main
-          npm ci --no-audit --no-fund
-          npm run build
+
+          # Unpack next to the live copy, then swap directories so the API never sees a half-extracted tree.
+          rm -rf .release-new .release-old
+          mkdir .release-new
+          tar -xzf /tmp/relun-release.tgz -C .release-new
+          mkdir .release-old
+          [ -d dist ] && mv dist .release-old/
+          [ -d node_modules ] && mv node_modules .release-old/
+          mv .release-new/dist .release-new/node_modules .
+          rm -rf .release-new .release-old /tmp/relun-release.tgz
+
           pm2 restart relun-api --update-env
           pm2 save
           EOF
@@ -48,4 +85,3 @@ jobs:
             sleep 5
           done
           echo "Health check failed after deploy"; exit 1
-          
