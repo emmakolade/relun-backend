@@ -143,9 +143,9 @@ export const waitlistEmail = (params: { recipient: string; platform?: 'android' 
 export const otpEmail = (params: { code: string; minutes: number; recipient: string }) => {
   const code = escapeHtml(params.code);
   const content = `
-                  <h1 style="margin:0 0 12px;font-size:24px;line-height:32px;font-weight:700;color:${C.ink};">Your sign-in code</h1>
+                  <h1 style="margin:0 0 12px;font-size:24px;line-height:32px;font-weight:700;color:${C.ink};">Your verification code</h1>
                   <p style="margin:0 0 28px;font-size:16px;line-height:24px;color:${C.body};">
-                    Enter this code in Relun to continue. It expires in ${params.minutes} minutes.
+                    Your Relun verification code is <strong style="color:${C.ink};">${code}</strong>. Enter it in Relun to continue. It expires in ${params.minutes} minutes.
                   </p>
                   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                     <tr>
@@ -162,13 +162,14 @@ export const otpEmail = (params: { code: string; minutes: number; recipient: str
                   </p>`;
 
   return {
-    subject: `${params.code} is your Relun code`,
+    // Gmail's "Copy code" button keys off wording like "verification code is 123456" sitting next to the digits.
+    subject: `${params.code} is your Relun verification code`,
     text:
-      `Your Relun sign-in code is ${params.code}. It expires in ${params.minutes} minutes.\n\n` +
+      `Your Relun verification code is ${params.code}. It expires in ${params.minutes} minutes.\n\n` +
       `Never share this code. If you didn't try to sign in, you can ignore this email.`,
     ...renderEmail({
-      preheader: `Your sign-in code is ${params.code}. It expires in ${params.minutes} minutes.`,
-      title: 'Your Relun sign-in code',
+      preheader: `Your Relun verification code is ${params.code}. It expires in ${params.minutes} minutes.`,
+      title: 'Your Relun verification code',
       content,
       recipient: params.recipient,
     }),
