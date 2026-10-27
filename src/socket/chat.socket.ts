@@ -21,7 +21,7 @@ import {
 } from '../types';
 import { addConnection, removeConnection, isUserOnline } from './presence';
 import { touchActivity } from '../services/activity.service';
-import { notifyNewMessage } from '../services/push.service';
+import { notifyNewMessage, notifyFirstMessageEmail } from '../services/push.service';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -237,6 +237,7 @@ export const initializeSocketIO = (io: Server) => {
           content,
           messageType,
         });
+        const firstMessage = (await Message.countDocuments({ conversationId, receiverId: recipientId })) === 1;
 
         const newMessageEvent: SocketNewMessageEvent = {
           conversationId,
@@ -253,7 +254,9 @@ export const initializeSocketIO = (io: Server) => {
         // Only push when they have no live connection: someone with the app
         // open already got the event above, and a push would just duplicate it.
         if (!isUserOnline(recipientId)) {
-          void notifyNewMessage({ recipientId, senderId: userId, content });
+          void notifyNewMessage({ recipientId, senderId: userId, content, firstMessage });
+        } else if (firstMessage) {
+          void notifyFirstMessageEmail({ recipientId, senderId: userId });
         }
       } catch (error) {
         console.error('Send message error:', error);

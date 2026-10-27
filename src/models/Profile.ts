@@ -35,6 +35,7 @@ export interface IProfile extends Document {
   showAge: boolean;
   showDistance: boolean;
   notificationsEnabled: boolean;
+  emailNotificationsEnabled: boolean;
   allowMessageRequests: boolean;
   maxDistanceKm: number;
   ageMin: number;
@@ -103,6 +104,7 @@ const profileSchema = new Schema<IProfile>(
     showAge: { type: Boolean, default: true },
     showDistance: { type: Boolean, default: true },
     notificationsEnabled: { type: Boolean, default: true },
+    emailNotificationsEnabled: { type: Boolean, default: true },
     // Lets people who aren't matches pay to send a message request.
     allowMessageRequests: { type: Boolean, default: true },
     // Discovery filters, set from the Filters sheet.

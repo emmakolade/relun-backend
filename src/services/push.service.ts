@@ -4,6 +4,9 @@ import { Message } from '../models/Message';
 import { Profile } from '../models/Profile';
 import { getFirebaseMessaging } from './firebase.service';
 import { addNotification } from './inbox.service';
+import { sendEmail } from './email.service';
+import { socialEmail } from './emailTemplates';
+import { NotificationDelivery } from '../models/NotificationDelivery';
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 // Expo accepts at most 100 messages per request.
@@ -17,6 +20,40 @@ export type PushPayload = {
   body: string;
   data?: Record<string, unknown>;
   badge?: number;
+};
+
+const emailSocialEvent = async (params: {
+  userId: string;
+  subject: string;
+  heading: string;
+  body: string;
+  eventKey?: string;
+} ): Promise<void> => {
+  let reservedKey = false;
+  try {
+    const [user, profile] = await Promise.all([
+      User.findById(params.userId).select('email isEmailVerified fullName isActive').lean(),
+      Profile.findOne({ userId: params.userId }).select('emailNotificationsEnabled').lean(),
+    ]);
+    if (!user?.isActive || !user.email || !user.isEmailVerified || profile?.emailNotificationsEnabled === false) return;
+    if (params.eventKey) {
+      try {
+        await NotificationDelivery.create({ key: params.eventKey, userId: params.userId });
+        reservedKey = true;
+      } catch (error) {
+        if ((error as { code?: number }).code === 11000) return;
+        throw error;
+      }
+    }
+    const name = user.fullName?.trim().split(' ')[0] || 'there';
+    const email = socialEmail({ subject: params.subject, heading: params.heading, body: params.body, name, recipient: user.email });
+    await sendEmail({ to: user.email, ...email });
+  } catch (error) {
+    if (reservedKey && params.eventKey) {
+      await NotificationDelivery.deleteOne({ key: params.eventKey }).catch(() => {});
+    }
+    console.error('Social notification email error:', error);
+  }
 };
 
 type ExpoTicket = {
@@ -173,6 +210,7 @@ export const notifyNewMessage = async (params: {
   recipientId: string;
   senderId: string;
   content: string;
+  firstMessage?: boolean;
 }): Promise<void> => {
   try {
     const [sender, unreadCount] = await Promise.all([
@@ -187,6 +225,7 @@ export const notifyNewMessage = async (params: {
       // The app reads this to open the right conversation on tap.
       data: { type: 'message', userId: params.senderId },
     });
+    if (params.firstMessage) void notifyFirstMessageEmail({ recipientId: params.recipientId, senderId: params.senderId });
   } catch (error) {
     console.error('Notify new message error:', error);
   }
@@ -209,6 +248,7 @@ export const notifyMessageRequest = async (params: {
       body: `${name} sent you a message. Reply to match, or decline.`,
       data: { userId: params.senderId },
     });
+    void emailSocialEvent({ userId: params.recipientId, subject: 'You have a new message request on Relun', heading: 'A new message request', body: `${name} sent you a message request. Open Relun to review it.` });
     await sendPushToUser(params.recipientId, {
       title: 'New message request',
       body: `${name}: ${preview(params.content)}`,
@@ -235,6 +275,7 @@ export const notifyNewMatch = async (params: {
       body: `You and ${matchedUser?.fullName?.split(' ')[0] || 'someone'} liked each other. Say hello!`,
       data: { userId: params.matchedUserId },
     });
+    void emailSocialEvent({ userId: params.recipientId, subject: "It's a match on Relun", heading: "It's a match!", body: `You and ${matchedUser?.fullName?.split(' ')[0] || 'someone'} liked each other. Open Relun and say hello.` });
     await sendPushToUser(params.recipientId, {
       title: "It's a match!",
       body: `You and ${matchedUser?.fullName || 'someone'} liked each other.`,
@@ -264,6 +305,7 @@ export const notifyDateRequest = async (params: {
       body,
       data: { userId: params.requesterId },
     });
+    void emailSocialEvent({ userId: params.ownerId, subject: 'Someone wants to join your date on Relun', heading: 'New date request', body });
     await sendPushToUser(params.ownerId, {
       title: 'New date request',
       body,
@@ -291,6 +333,7 @@ export const notifyDateAccepted = async (params: {
       body,
       data: { userId: params.ownerId },
     });
+    void emailSocialEvent({ userId: params.requesterId, subject: 'Your date request was accepted on Relun', heading: 'Date request accepted', body });
     await sendPushToUser(params.requesterId, {
       title: 'Date accepted',
       body,
@@ -315,6 +358,7 @@ export const notifyLiked = async (params: { recipientId: string; likerId: string
       body: 'See who it is, and match instantly.',
       data: { userId: params.likerId },
     });
+    void emailSocialEvent({ userId: params.recipientId, subject: 'Someone likes you on Relun', heading: 'Someone likes you', body: 'Someone nearby likes your profile. Open Relun to see who it is and decide what to do.' });
     await sendPushToUser(params.recipientId, {
       title: 'Someone likes you 👀',
       body: 'Open Relun to see who it is.',
@@ -322,6 +366,23 @@ export const notifyLiked = async (params: { recipientId: string; likerId: string
     });
   } catch (error) {
     console.error('Notify liked error:', error);
+  }
+};
+
+/** Email only once per sender/recipient conversation, regardless of transport or online status. */
+export const notifyFirstMessageEmail = async (params: { recipientId: string; senderId: string }): Promise<void> => {
+  try {
+    const sender = await User.findById(params.senderId).select('fullName').lean();
+    const name = sender?.fullName?.trim().split(' ')[0] || 'Someone';
+    await emailSocialEvent({
+      userId: params.recipientId,
+      subject: 'You have a new message on Relun',
+      heading: 'A new message',
+      body: `${name} sent you a message. Open Relun to read and reply.`,
+      eventKey: `first_message:${params.senderId}:${params.recipientId}`,
+    });
+  } catch (error) {
+    console.error('First message email error:', error);
   }
 };
 

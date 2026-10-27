@@ -175,3 +175,36 @@ export const otpEmail = (params: { code: string; minutes: number; recipient: str
     }),
   };
 };
+
+/** Likes, matches, messages and date requests. [body] is plain text and gets escaped here. */
+export const socialEmail = (params: { subject: string; heading: string; body: string; name: string; recipient: string }) => {
+  const content = `
+                  <h1 style="margin:0 0 12px;font-size:24px;line-height:32px;font-weight:700;color:${C.ink};">${escapeHtml(params.heading)}</h1>
+                  <p style="margin:0 0 12px;font-size:16px;line-height:24px;color:${C.body};">Hi ${escapeHtml(params.name)},</p>
+                  <p style="margin:0 0 28px;font-size:16px;line-height:24px;color:${C.body};">
+                    ${escapeHtml(params.body)}
+                  </p>
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="border-radius:999px;background:${C.rose};">
+                        <a href="https://relun.chat/app/" style="display:inline-block;padding:14px 28px;font-size:16px;font-weight:700;color:#FFFFFF;text-decoration:none;border-radius:999px;">Open Relun</a>
+                      </td>
+                    </tr>
+                  </table>
+                  <p style="margin:28px 0 0;font-size:14px;line-height:22px;color:${C.muted};">
+                    You can turn off email notifications in your Relun settings.
+                  </p>`;
+
+  return {
+    subject: params.subject,
+    text:
+      `Hi ${params.name},\n\n${params.body}\n\nOpen Relun: https://relun.chat/app/\n\n` +
+      `You can turn off email notifications in your Relun settings.`,
+    ...renderEmail({
+      preheader: params.body,
+      title: params.subject,
+      content,
+      recipient: params.recipient,
+    }),
+  };
+};

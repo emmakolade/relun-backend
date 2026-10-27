@@ -15,7 +15,7 @@ import {
   messageRequestViews,
 } from '../services/messageRequest.service';
 import { spendCoins, creditCoins, InsufficientCoinsError } from '../services/wallet.service';
-import { notifyMessageRequest, notifyNewMatch, notifyNewMessage } from '../services/push.service';
+import { notifyMessageRequest, notifyNewMatch, notifyNewMessage, notifyFirstMessageEmail } from '../services/push.service';
 import { isUserOnline } from '../socket/presence';
 import { getIO } from '../socket/io';
 import { COIN_COSTS } from '../config/coins';
@@ -273,6 +273,7 @@ const deliver = async (params: {
     content,
     messageType: 'text',
   });
+  const firstMessage = (await Message.countDocuments({ conversationId, receiverId: recipientId })) === 1;
 
   const event = { conversationId, message: message.toJSON() };
   const io = getIO();
@@ -281,7 +282,8 @@ const deliver = async (params: {
 
   // A request always pushes: it's the one message they have no reason to expect.
   if (params.request) void notifyMessageRequest({ recipientId, senderId: userId, content });
-  else if (!isUserOnline(recipientId)) void notifyNewMessage({ recipientId, senderId: userId, content });
+  else if (!isUserOnline(recipientId)) void notifyNewMessage({ recipientId, senderId: userId, content, firstMessage });
+  else if (firstMessage) void notifyFirstMessageEmail({ recipientId, senderId: userId });
 
   return message;
 };
