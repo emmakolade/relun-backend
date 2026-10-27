@@ -118,7 +118,7 @@ export const PLUS_PLANS: PlusPlan[] = [
   {
     id: 'weekly',
     days: 7,
-    amount: num('PLUS_WEEKLY_PRICE', 120_000),
+    amount: num('PLUS_WEEKLY_PRICE', 149_900),
     currency: PAYSTACK_CURRENCY,
     paystackPlanCode: process.env.PAYSTACK_PLAN_WEEKLY || null,
     playBasePlanId: 'weekly',
@@ -126,7 +126,7 @@ export const PLUS_PLANS: PlusPlan[] = [
   {
     id: 'monthly',
     days: 30,
-    amount: num('PLUS_MONTHLY_PRICE', 250_000),
+    amount: num('PLUS_MONTHLY_PRICE', 299_900),
     currency: PAYSTACK_CURRENCY,
     paystackPlanCode: process.env.PAYSTACK_PLAN_MONTHLY || null,
     playBasePlanId: 'monthly',
