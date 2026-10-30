@@ -9,6 +9,7 @@ import { Like, getMatchedUserIds } from '../models/Like';
 import { Pass } from '../models/Pass';
 import { ProfileView } from '../models/ProfileView';
 import { getBlockedUserIds, isBlockedEitherWay } from '../models/Block';
+import { getAppSettings } from '../models/AppSettings';
 import { toCard } from '../services/card.service';
 import { canSeeInsights, hasPlus, likeAllowance } from '../services/plus.service';
 import { deleteImage, uploadImage, uploadMultipleImages } from '../services/cloudinary.service';
@@ -955,20 +956,22 @@ export const getNearbyUsers = async (req: AuthRequest, res: Response): Promise<v
         ? [currentProfile.longitude, currentProfile.latitude]
         : null;
 
+    // Admin switch: ignore everyone's max distance and show people anywhere, nearest first.
+    const { discoverEveryone } = await getAppSettings();
+
     const firstStage: PipelineStage = coordinates
       ? {
           $geoNear: {
             near: { type: 'Point', coordinates } as any,
             distanceField: 'distance',
-            maxDistance: (currentProfile?.maxDistanceKm ?? 35) * 1000,
+            ...(discoverEveryone ? {} : { maxDistance: (currentProfile?.maxDistanceKm ?? 35) * 1000 }),
             spherical: true,
             query: profileFilter,
           },
         }
       : { $match: profileFilter };
 
-    const rows = await Profile.aggregate([
-      firstStage,
+    const userStages: PipelineStage[] = [
       {
         $lookup: {
           from: 'users',
@@ -992,8 +995,19 @@ export const getNearbyUsers = async (req: AuthRequest, res: Response): Promise<v
       },
       { $unwind: '$user' },
       ...wantsViewer,
-      { $limit: safeLimit },
-    ]);
+    ];
+
+    const rows = await Profile.aggregate([firstStage, ...userStages, { $limit: safeLimit }]);
+
+    // $geoNear skips profiles without a location; in show-everyone mode they go after the rest.
+    if (discoverEveryone && coordinates && rows.length < safeLimit) {
+      const unlocated = await Profile.aggregate([
+        { $match: { ...profileFilter, 'location.coordinates.0': { $exists: false } } },
+        ...userStages,
+        { $limit: safeLimit - rows.length },
+      ]);
+      rows.push(...unlocated);
+    }
 
     const photos = await Photo.find({ userId: { $in: rows.map((row) => row.userId) } })
       .sort({ order: 1 })

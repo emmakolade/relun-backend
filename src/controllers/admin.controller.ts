@@ -1,6 +1,7 @@
 import os from 'os';
 import { Response, NextFunction } from 'express';
 import { PipelineStage } from 'mongoose';
+import { validationResult } from 'express-validator';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { User } from '../models/User';
 import { Profile } from '../models/Profile';
@@ -11,6 +12,7 @@ import { Plus, PlusPayment } from '../models/Plus';
 import { CoinTransaction } from '../models/CoinTransaction';
 import { Report } from '../models/Report';
 import { ActiveDay } from '../models/ActiveDay';
+import { getAppSettings, updateAppSettings } from '../models/AppSettings';
 import { getIO } from '../socket/io';
 import { onlineCount } from '../socket/presence';
 import {
@@ -260,5 +262,34 @@ export const getStats = async (_req: AuthRequest, res: Response): Promise<void> 
   } catch (error) {
     console.error('Admin stats error:', error);
     res.status(500).json({ error: 'Failed to load stats' });
+  }
+};
+
+/** GET /api/admin/settings */
+export const getAdminSettings = async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    res.json(await getAppSettings());
+  } catch (error) {
+    console.error('Admin settings error:', error);
+    res.status(500).json({ error: 'Failed to load settings' });
+  }
+};
+
+/** PATCH /api/admin/settings */
+export const updateAdminSettings = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array() });
+      return;
+    }
+    const patch: { discoverEveryone?: boolean } = {};
+    if (typeof req.body.discoverEveryone === 'boolean') patch.discoverEveryone = req.body.discoverEveryone;
+    const settings = await updateAppSettings(patch);
+    console.log(`Admin ${req.user?.id} updated app settings:`, patch);
+    res.json(settings);
+  } catch (error) {
+    console.error('Admin settings update error:', error);
+    res.status(500).json({ error: 'Failed to update settings' });
   }
 };
